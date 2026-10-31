@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tab_apps">التطبيقات</string>
+    <string name="tab_mine">أيقوناتي</string>
+    <string name="search_hint">ابحث عن تطبيق</string>
+    <string name="empty_apps">لا توجد تطبيقات</string>
+    <string name="empty_mine">لم تنشئ أي أيقونة بعد.\nاختر تطبيقًا من تبويب التطبيقات.</string>
+    <string name="empty_search">لا توجد نتائج</string>
+
+    <string name="menu_about">عن الاختصارات</string>
+    <string name="about_title">كيف يعمل التطبيق</string>
+    <string name="about_msg">ينشئ Icon Studio اختصارًا مخصصًا على الشاشة الرئيسية بالصورة والاسم اللذين تختارهما، وعند الضغط عليه يفتح التطبيق الأصلي.\n\nلا يغيّر التطبيق الأيقونة الحقيقية داخل نظام أندرويد أو درج التطبيقات؛ يبقى التطبيق الأصلي كما هو. إن أردت، أخفِ الأيقونة الأصلية أو أزلها من الشاشة الرئيسية بنفسك.\n\nتتم معالجة كل الصور على هاتفك فقط. التطبيق بلا إنترنت وبلا إعلانات.</string>
+
+    <string name="editor_title_new">أيقونة جديدة</string>
+    <string name="editor_title_edit">تعديل الأيقونة</string>
+    <string name="hint_name">اسم الاختصار</string>
+    <string name="hint_gestures">اسحب للتحريك وقرّب بإصبعين للتكبير</string>
+    <string name="label_rotation">تدوير دقيق</string>
+    <string name="label_background">الخلفية</string>
+    <string name="bg_transparent">شفاف</string>
+    <string name="bg_black">أسود</string>
+    <string name="bg_white">أبيض</string>
+    <string name="bg_gray">رمادي</string>
+    <string name="btn_pick">اختيار صورة</string>
+    <string name="btn_original">الأيقونة الأصلية</string>
+    <string name="btn_rotate">تدوير ٩٠°</string>
+    <string name="btn_reset">إعادة ضبط</string>
+    <string name="btn_add_home">إضافة إلى الشاشة الرئيسية</string>
+    <string name="btn_update">حفظ وتحديث الاختصار</string>
+    <string name="editor_note">يضيف هذا اختصارًا مخصصًا إلى الشاشة الرئيسية يفتح التطبيق الأصلي. ولا يغيّر أيقونة التطبيق الأصلية.</string>
+
+    <string name="delete">حذف</string>
+    <string name="dialog_delete_title">حذف هذه الأيقونة؟</string>
+    <string name="dialog_delete_msg">ستُحذف الصورة والإعدادات المحفوظة وسيتوقف الاختصار عن العمل. إن كانت أيقونته ما زالت على الشاشة الرئيسية فاضغط عليها مطولًا ثم أزلها.</string>
+    <string name="shortcut_removed_msg">تمت إزالته من Icon Studio</string>
+
+    <string name="toast_pick_first">اختر صورة أولًا</string>
+    <string name="toast_pin_requested">أكّد في نافذة النظام لإضافة الأيقونة إلى الشاشة الرئيسية</string>
+    <string name="toast_updated">تم تحديث الاختصار</string>
+    <string name="toast_pin_unsupported">الشاشة الرئيسية الحالية لا تدعم إضافة الاختصارات</string>
+    <string name="toast_failed">تعذّر إنشاء الاختصار</string>
+    <string name="toast_image_failed">تعذّر فتح هذه الصورة</string>
+    <string name="toast_app_missing">هذا التطبيق لم يعد مثبتًا</string>
+</resources>

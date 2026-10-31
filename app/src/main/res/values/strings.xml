@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name" translatable="false">Icon Studio</string>
+
+    <string name="tab_apps">Apps</string>
+    <string name="tab_mine">My icons</string>
+    <string name="search_hint">Search apps</string>
+    <string name="empty_apps">No apps found</string>
+    <string name="empty_mine">You haven\'t created any icons yet.\nPick an app from the Apps tab.</string>
+    <string name="empty_search">No results</string>
+
+    <string name="menu_about">About shortcuts</string>
+    <string name="about_title">How it works</string>
+    <string name="about_msg">Icon Studio adds a custom shortcut to your home screen with the image and name you choose. Tapping it opens the original app.\n\nIt does not change the app\'s real icon in Android or in the app drawer; the original app stays as it is. If you want, hide or remove the original icon from your home screen yourself.\n\nAll images are processed on your phone. This app has no internet access and no ads.</string>
+
+    <string name="editor_title_new">New icon</string>
+    <string name="editor_title_edit">Edit icon</string>
+    <string name="hint_name">Shortcut name</string>
+    <string name="hint_gestures">Drag to move, pinch to zoom</string>
+    <string name="label_rotation">Fine rotation</string>
+    <string name="label_background">Background</string>
+    <string name="bg_transparent">Transparent</string>
+    <string name="bg_black">Black</string>
+    <string name="bg_white">White</string>
+    <string name="bg_gray">Gray</string>
+    <string name="btn_pick">Choose image</string>
+    <string name="btn_original">Original icon</string>
+    <string name="btn_rotate">Rotate 90°</string>
+    <string name="btn_reset">Reset</string>
+    <string name="btn_add_home">Add to home screen</string>
+    <string name="btn_update">Save and update shortcut</string>
+    <string name="editor_note">This adds a custom shortcut to your home screen that opens the original app. It does not change the original app icon.</string>
+
+    <string name="delete">Delete</string>
+    <string name="dialog_delete_title">Delete this icon?</string>
+    <string name="dialog_delete_msg">The saved image and settings will be removed and the shortcut will stop working. If its icon is still on your home screen, long-press it and remove it.</string>
+    <string name="shortcut_removed_msg">Removed from Icon Studio</string>
+
+    <string name="toast_pick_first">Choose an image first</string>
+    <string name="toast_pin_requested">Confirm in the system dialog to add the icon to your home screen</string>
+    <string name="toast_updated">Shortcut updated</string>
+    <string name="toast_pin_unsupported">Your launcher does not support adding shortcuts</string>
+    <string name="toast_failed">Couldn\'t create the shortcut</string>
+    <string name="toast_image_failed">Couldn\'t open this image</string>
+    <string name="toast_app_missing">This app is no longer installed</string>
+</resources>
