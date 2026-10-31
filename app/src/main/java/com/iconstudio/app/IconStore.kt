@@ -27,6 +27,12 @@ class IconStore private constructor(ctx: Context) {
         readAll().firstOrNull { it.id == id }
     }
 
+    /** The home-screen (launcher) icon already saved for this app, if any. */
+    fun findLauncher(pkg: String, activity: String): IconEntry? = synchronized(lock) {
+        readAll().filter { it.launcher && it.pkg == pkg && it.activity == activity }
+            .maxByOrNull { it.updatedAt }
+    }
+
     fun upsert(entry: IconEntry) = synchronized(lock) {
         writeAll(readAll().filter { it.id != entry.id } + entry)
     }

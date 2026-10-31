@@ -16,4 +16,12 @@
         <item name="android:statusBarColor">@color/bg</item>
         <item name="android:navigationBarColor">@color/bg</item>
     </style>
+
+    <!-- Home screen: shows the system wallpaper behind the app grid -->
+    <style name="Theme.IconStudio.Launcher" parent="Theme.IconStudio">
+        <item name="android:windowShowWallpaper">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
 </resources>

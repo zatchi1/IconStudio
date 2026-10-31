@@ -4,6 +4,7 @@ import android.content.Intent
 import android.graphics.BitmapFactory
 import android.graphics.drawable.BitmapDrawable
 import android.os.Bundle
+import android.provider.Settings
 import android.view.View
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.widget.doAfterTextChanged
@@ -33,11 +34,10 @@ class MainActivity : AppCompatActivity() {
 
         b.toolbar.inflateMenu(R.menu.main_menu)
         b.toolbar.setOnMenuItemClickListener { item ->
-            if (item.itemId == R.id.action_about) {
-                showAbout()
-                true
-            } else {
-                false
+            when (item.itemId) {
+                R.id.action_about -> { showAbout(); true }
+                R.id.action_home -> { openHomeSettings(); true }
+                else -> false
             }
         }
 
@@ -99,7 +99,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun loadMine() {
         val store = IconStore.get(this)
-        mine = store.list().map { e ->
+        mine = store.list().filter { !it.launcher }.map { e ->
             val bmp = BitmapFactory.decodeFile(store.iconFile(e.id).path)
             Row(
                 title = e.label,
@@ -160,6 +160,18 @@ class MainActivity : AppCompatActivity() {
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
+    }
+
+    private fun openHomeSettings() {
+        try {
+            startActivity(Intent(Settings.ACTION_HOME_SETTINGS))
+        } catch (e: Exception) {
+            try {
+                startActivity(Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS))
+            } catch (e2: Exception) {
+                startActivity(Intent(Settings.ACTION_SETTINGS))
+            }
+        }
     }
 
     private fun showAbout() {

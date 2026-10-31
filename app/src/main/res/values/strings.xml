@@ -34,6 +34,20 @@
     <string name="compat_mode">No-badge mode (old method; turn it off if nothing appears)</string>
     <string name="toast_legacy_sent">Shortcut sent to your home screen. If nothing appears, turn the no-badge mode off and try again.</string>
 
+    <string name="menu_home">Use as home screen</string>
+    <string name="menu_shortcuts_mode">Shortcuts mode</string>
+    <string name="menu_home_settings">Home screen settings</string>
+    <string name="menu_change_icon">Change icon</string>
+    <string name="menu_reset_icon">Restore original icon</string>
+    <string name="menu_add_dock">Add to dock</string>
+    <string name="menu_remove_dock">Remove from dock</string>
+    <string name="menu_app_info">App info</string>
+    <string name="menu_uninstall">Uninstall</string>
+    <string name="editor_title_apply">Change icon</string>
+    <string name="btn_apply">Apply icon</string>
+    <string name="toast_icon_applied">Icon applied</string>
+    <string name="toast_dock_full">The dock is full (5 apps)</string>
+
     <string name="delete">Delete</string>
     <string name="dialog_delete_title">Delete this icon?</string>
     <string name="dialog_delete_msg">The saved image and settings will be removed and the shortcut will stop working. If its icon is still on your home screen, long-press it and remove it.</string>

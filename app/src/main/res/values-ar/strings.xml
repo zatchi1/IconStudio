@@ -32,6 +32,20 @@
     <string name="compat_mode">وضع بلا علامة (الطريقة القديمة، أوقفه إذا لم يظهر شيء)</string>
     <string name="toast_legacy_sent">أُرسل الاختصار إلى الشاشة الرئيسية. إذا لم يظهر شيء فأوقف الوضع بلا علامة وجرّب من جديد.</string>
 
+    <string name="menu_home">استخدمه كشاشة رئيسية</string>
+    <string name="menu_shortcuts_mode">وضع الاختصارات</string>
+    <string name="menu_home_settings">إعدادات الشاشة الرئيسية</string>
+    <string name="menu_change_icon">تغيير الأيقونة</string>
+    <string name="menu_reset_icon">استعادة الأيقونة الأصلية</string>
+    <string name="menu_add_dock">إضافة إلى الشريط السفلي</string>
+    <string name="menu_remove_dock">إزالة من الشريط السفلي</string>
+    <string name="menu_app_info">معلومات التطبيق</string>
+    <string name="menu_uninstall">إلغاء التثبيت</string>
+    <string name="editor_title_apply">تغيير الأيقونة</string>
+    <string name="btn_apply">تطبيق الأيقونة</string>
+    <string name="toast_icon_applied">تم تطبيق الأيقونة</string>
+    <string name="toast_dock_full">الشريط السفلي ممتلئ (٥ تطبيقات)</string>
+
     <string name="delete">حذف</string>
     <string name="dialog_delete_title">حذف هذه الأيقونة؟</string>
     <string name="dialog_delete_msg">ستُحذف الصورة والإعدادات المحفوظة وسيتوقف الاختصار عن العمل. إن كانت أيقونته ما زالت على الشاشة الرئيسية فاضغط عليها مطولًا ثم أزلها.</string>

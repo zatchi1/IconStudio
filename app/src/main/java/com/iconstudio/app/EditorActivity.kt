@@ -7,6 +7,7 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
 import android.provider.MediaStore
+import android.view.View
 import android.widget.SeekBar
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -22,6 +23,7 @@ class EditorActivity : AppCompatActivity() {
         const val EXTRA_ACTIVITY = "activity"
         const val EXTRA_APP_LABEL = "app_label"
         const val EXTRA_ENTRY_ID = "entry_id"
+        const val EXTRA_APPLY_MODE = "apply_mode"
 
         private const val ICON_SIZE = 192
         private const val SOURCE_MAX = 1280
@@ -32,6 +34,7 @@ class EditorActivity : AppCompatActivity() {
     private var pkg = ""
     private var activityName = ""
     private var appLabel = ""
+    private var applyMode = false
 
     private var source: Bitmap? = null
     private var sourceDirty = false
@@ -56,14 +59,18 @@ class EditorActivity : AppCompatActivity() {
         b = ActivityEditorBinding.inflate(layoutInflater)
         setContentView(b.root)
 
-        val existing = intent.getStringExtra(EXTRA_ENTRY_ID)?.let { IconStore.get(this).get(it) }
-        entry = existing
+        applyMode = intent.getBooleanExtra(EXTRA_APPLY_MODE, false)
+        var existing = intent.getStringExtra(EXTRA_ENTRY_ID)?.let { IconStore.get(this).get(it) }
         pkg = existing?.pkg ?: intent.getStringExtra(EXTRA_PKG).orEmpty()
         if (pkg.isEmpty()) {
             finish()
             return
         }
         activityName = existing?.activity ?: intent.getStringExtra(EXTRA_ACTIVITY).orEmpty()
+        if (applyMode && existing == null) {
+            existing = IconStore.get(this).findLauncher(pkg, activityName)
+        }
+        entry = existing
         appLabel = existing?.appLabel
             ?: intent.getStringExtra(EXTRA_APP_LABEL).orEmpty().ifEmpty { pkg }
 
@@ -80,6 +87,10 @@ class EditorActivity : AppCompatActivity() {
             }
         }
         b.compatMode.isChecked = true
+        if (applyMode) {
+            b.compatMode.visibility = View.GONE
+            b.editorNote.visibility = View.GONE
+        }
         b.btnOriginal.setOnClickListener { loadOriginalIcon() }
         b.btnRotate.setOnClickListener {
             b.editor.angle = normalize(b.editor.angle + 90f)
@@ -188,7 +199,10 @@ class EditorActivity : AppCompatActivity() {
     }
 
     private fun refreshTexts() {
-        if (entry != null) {
+        if (applyMode) {
+            b.toolbar.setTitle(R.string.editor_title_apply)
+            b.btnSave.setText(R.string.btn_apply)
+        } else if (entry != null) {
             b.toolbar.setTitle(R.string.editor_title_edit)
             b.btnSave.setText(R.string.btn_update)
         } else {
@@ -230,7 +244,8 @@ class EditorActivity : AppCompatActivity() {
                     ty = state.ty,
                     angle = state.angle,
                     bg = state.bg,
-                    updatedAt = System.currentTimeMillis()
+                    updatedAt = System.currentTimeMillis(),
+                    launcher = applyMode
                 )
                 store.upsert(e)
                 e
@@ -248,6 +263,11 @@ class EditorActivity : AppCompatActivity() {
                 entry = saved
                 sourceDirty = false
                 refreshTexts()
+                if (applyMode) {
+                    toast(R.string.toast_icon_applied)
+                    finish()
+                    return@runOnUiThread
+                }
                 var result = if (b.compatMode.isChecked) {
                     ShortcutHelper.pinLegacy(this, saved, output)
                 } else {
