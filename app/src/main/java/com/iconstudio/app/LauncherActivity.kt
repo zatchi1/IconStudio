@@ -351,6 +351,7 @@ class LauncherActivity : AppCompatActivity() {
         return if (item.w == 1 && item.h == 1) {
             val vb = ItemAppBinding.inflate(layoutInflater)
             bindIcon(vb, cell)
+            fitIcon(vb)
             vb.root.setOnClickListener { open(cell) }
             vb.root.setOnLongClickListener { startDrag(it, item) }
             vb.root
@@ -369,6 +370,26 @@ class LauncherActivity : AppCompatActivity() {
             tb.tile.setOnClickListener { open(cell) }
             tb.tile.setOnLongClickListener { startDrag(it, item) }
             tb.root
+        }
+    }
+
+    /**
+     * Sizes the icon from the real cell size so the icon and its name always fit, whatever the
+     * screen, instead of using a fixed size that can push the name out of the cell.
+     */
+    private fun fitIcon(vb: ItemAppBinding) {
+        vb.root.addOnLayoutChangeListener { _, l, t, r, bt, _, _, _, _ ->
+            val w = r - l
+            val h = bt - t
+            if (w <= 0 || h <= 0) return@addOnLayoutChangeListener
+            val reserved = dp(22)              // name line + gaps + padding
+            val s = minOf((w * 0.70f).toInt(), h - reserved).coerceAtLeast(dp(28))
+            val lp = vb.icon.layoutParams
+            if (lp.width != s || lp.height != s) {
+                lp.width = s
+                lp.height = s
+                vb.icon.layoutParams = lp
+            }
         }
     }
 
