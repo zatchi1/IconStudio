@@ -46,6 +46,22 @@
     <string name="toast_icon_applied">تم تطبيق الأيقونة</string>
     <string name="toast_dock_full">الشريط السفلي ممتلئ (٥ تطبيقات)</string>
 
+    <string name="menu_add_page">إضافة صفحة</string>
+    <string name="menu_delete_page">حذف هذه الصفحة</string>
+    <string name="menu_size">الحجم</string>
+    <string name="menu_to_home">نقل إلى الشاشة الرئيسية</string>
+    <string name="menu_add_home">إضافة إلى الشاشة الرئيسية</string>
+    <string name="menu_remove_home">إزالة من الشاشة الرئيسية</string>
+    <string name="toast_no_room">لا توجد مساحة كافية هنا</string>
+    <string name="toast_page_not_empty">يمكن حذف الصفحة الفارغة فقط</string>
+
+    <string name="label_size">الحجم في الشاشة الرئيسية</string>
+    <string name="menu_add_widget">إضافة ويدجت</string>
+    <string name="menu_remove_widget">إزالة الويدجت</string>
+    <string name="title_widgets">الويدجات</string>
+    <string name="widget_unavailable">الويدجت غير متاح</string>
+    <string name="toast_widget_failed">تعذّرت إضافة هذا الويدجت</string>
+
     <string name="delete">حذف</string>
     <string name="dialog_delete_title">حذف هذه الأيقونة؟</string>
     <string name="dialog_delete_msg">ستُحذف الصورة والإعدادات المحفوظة وسيتوقف الاختصار عن العمل. إن كانت أيقونته ما زالت على الشاشة الرئيسية فاضغط عليها مطولًا ثم أزلها.</string>

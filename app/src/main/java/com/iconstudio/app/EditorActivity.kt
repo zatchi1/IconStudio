@@ -24,8 +24,10 @@ class EditorActivity : AppCompatActivity() {
         const val EXTRA_APP_LABEL = "app_label"
         const val EXTRA_ENTRY_ID = "entry_id"
         const val EXTRA_APPLY_MODE = "apply_mode"
+        const val EXTRA_SIZE = "size"   // 1..4 (cells); 0 = not placed, hide the size picker
 
         private const val ICON_SIZE = 192
+        private const val LAUNCHER_ICON_SIZE = 512
         private const val SOURCE_MAX = 1280
     }
 
@@ -90,6 +92,14 @@ class EditorActivity : AppCompatActivity() {
         if (applyMode) {
             b.compatMode.visibility = View.GONE
             b.editorNote.visibility = View.GONE
+            val size = intent.getIntExtra(EXTRA_SIZE, 0)
+            if (size in 1..4) {
+                b.sizeLabel.visibility = View.VISIBLE
+                b.sizeGroup.visibility = View.VISIBLE
+                b.sizeGroup.check(
+                    when (size) { 2 -> R.id.size2; 3 -> R.id.size3; 4 -> R.id.size4; else -> R.id.size1 }
+                )
+            }
         }
         b.btnOriginal.setOnClickListener { loadOriginalIcon() }
         b.btnRotate.setOnClickListener {
@@ -221,7 +231,7 @@ class EditorActivity : AppCompatActivity() {
         }
         val label = b.nameInput.text.toString().trim().ifEmpty { appLabel }
         val state = b.editor.getState()
-        val output = b.editor.renderOutput(ICON_SIZE) ?: return
+        val output = b.editor.renderOutput(if (applyMode) LAUNCHER_ICON_SIZE else ICON_SIZE) ?: return
         val previous = entry
         val needSource = sourceDirty || previous == null
 
@@ -265,6 +275,14 @@ class EditorActivity : AppCompatActivity() {
                 refreshTexts()
                 if (applyMode) {
                     toast(R.string.toast_icon_applied)
+                    val chosen = when (b.sizeGroup.checkedRadioButtonId) {
+                        R.id.size2 -> 2
+                        R.id.size3 -> 3
+                        R.id.size4 -> 4
+                        R.id.size1 -> 1
+                        else -> 0
+                    }
+                    setResult(RESULT_OK, Intent().putExtra(EXTRA_SIZE, chosen))
                     finish()
                     return@runOnUiThread
                 }

@@ -48,6 +48,22 @@
     <string name="toast_icon_applied">Icon applied</string>
     <string name="toast_dock_full">The dock is full (5 apps)</string>
 
+    <string name="menu_add_page">Add page</string>
+    <string name="menu_delete_page">Delete this page</string>
+    <string name="menu_size">Size</string>
+    <string name="menu_to_home">Move to home screen</string>
+    <string name="menu_add_home">Add to home screen</string>
+    <string name="menu_remove_home">Remove from home screen</string>
+    <string name="toast_no_room">No room for that here</string>
+    <string name="toast_page_not_empty">Only an empty page can be deleted</string>
+
+    <string name="label_size">Size on home screen</string>
+    <string name="menu_add_widget">Add widget</string>
+    <string name="menu_remove_widget">Remove widget</string>
+    <string name="title_widgets">Widgets</string>
+    <string name="widget_unavailable">Widget unavailable</string>
+    <string name="toast_widget_failed">Couldn\'t add this widget</string>
+
     <string name="delete">Delete</string>
     <string name="dialog_delete_title">Delete this icon?</string>
     <string name="dialog_delete_msg">The saved image and settings will be removed and the shortcut will stop working. If its icon is still on your home screen, long-press it and remove it.</string>

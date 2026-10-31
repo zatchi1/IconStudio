@@ -9,6 +9,20 @@ import android.view.ViewOutlineProvider
 import androidx.recyclerview.widget.RecyclerView
 import com.iconstudio.app.databinding.ItemAppBinding
 
+/** Rounded-square clip for custom icons. */
+object IconOutline : ViewOutlineProvider() {
+    override fun getOutline(view: View, outline: Outline) {
+        outline.setRoundRect(0, 0, view.width, view.height, view.width * 0.24f)
+    }
+}
+
+/** Rounded clip for big (multi-cell) tiles. */
+object TileOutline : ViewOutlineProvider() {
+    override fun getOutline(view: View, outline: Outline) {
+        outline.setRoundRect(0, 0, view.width, view.height, minOf(view.width, view.height) * 0.12f)
+    }
+}
+
 /** An installed launchable app. */
 data class AppItem(
     val key: String,
@@ -43,11 +57,7 @@ class AppGridAdapter(
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
         val vh = VH(ItemAppBinding.inflate(LayoutInflater.from(parent.context), parent, false))
         // Custom (square) images get the same rounded shape as other icons.
-        vh.b.icon.outlineProvider = object : ViewOutlineProvider() {
-            override fun getOutline(view: View, outline: Outline) {
-                outline.setRoundRect(0, 0, view.width, view.height, view.width * 0.24f)
-            }
-        }
+        vh.b.icon.outlineProvider = IconOutline
         return vh
     }
 
