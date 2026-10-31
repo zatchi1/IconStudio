@@ -27,6 +27,13 @@
         </activity>
 
         <activity
+            android:name=".LaunchActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <activity
             android:name=".EditorActivity"
             android:exported="false"
             android:configChanges="orientation|screenSize|keyboardHidden"

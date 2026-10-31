@@ -5,7 +5,6 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
 import android.widget.SeekBar
@@ -80,8 +79,7 @@ class EditorActivity : AppCompatActivity() {
                 pickFile.launch("image/*")
             }
         }
-        // Samsung launchers handle the old shortcut broadcast better than the new pin API.
-        b.compatMode.isChecked = Build.MANUFACTURER.equals("samsung", ignoreCase = true)
+        b.compatMode.isChecked = false
         b.btnOriginal.setOnClickListener { loadOriginalIcon() }
         b.btnRotate.setOnClickListener {
             b.editor.angle = normalize(b.editor.angle + 90f)

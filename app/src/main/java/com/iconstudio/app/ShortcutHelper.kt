@@ -22,17 +22,34 @@ object ShortcutHelper {
 
     enum class Result { REQUESTED, REQUESTED_LEGACY, UPDATED, UNSUPPORTED, FAILED }
 
-    fun launchIntent(ctx: Context, e: IconEntry): Intent? {
-        val intent: Intent? = if (e.activity.isNotEmpty()) {
+    const val EXTRA_PKG = "target_pkg"
+    const val EXTRA_ACTIVITY = "target_activity"
+
+    /** The real launch intent of the original app (used by LaunchActivity). */
+    fun targetIntent(ctx: Context, pkg: String, activity: String): Intent? {
+        val intent: Intent? = if (activity.isNotEmpty()) {
             Intent(Intent.ACTION_MAIN)
                 .addCategory(Intent.CATEGORY_LAUNCHER)
-                .setComponent(ComponentName(e.pkg, e.activity))
+                .setComponent(ComponentName(pkg, activity))
         } else {
-            ctx.packageManager.getLaunchIntentForPackage(e.pkg)?.apply {
+            ctx.packageManager.getLaunchIntentForPackage(pkg)?.apply {
                 action = Intent.ACTION_MAIN
             }
         }
         return intent?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+    }
+
+    /**
+     * The intent stored in the shortcut: it targets an activity of OUR app, which then starts
+     * the original app. This is the form every launcher (including Samsung's) supports.
+     */
+    fun launchIntent(ctx: Context, e: IconEntry): Intent? {
+        if (targetIntent(ctx, e.pkg, e.activity) == null) return null
+        return Intent(ctx, LaunchActivity::class.java)
+            .setAction("com.iconstudio.app.LAUNCH")
+            .putExtra(EXTRA_PKG, e.pkg)
+            .putExtra(EXTRA_ACTIVITY, e.activity)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
     }
 
     private fun isPinned(ctx: Context, id: String): Boolean {
