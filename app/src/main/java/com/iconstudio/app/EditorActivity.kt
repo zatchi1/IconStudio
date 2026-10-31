@@ -1,9 +1,13 @@
 package com.iconstudio.app
 
+import android.content.ActivityNotFoundException
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.provider.MediaStore
 import android.widget.SeekBar
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -35,8 +39,15 @@ class EditorActivity : AppCompatActivity() {
 
     private val io = Executors.newSingleThreadExecutor()
 
-    // Works on Android 9: opens the system gallery / file picker (no storage permission needed).
-    private val pickImage =
+    // Opens the gallery directly (no storage permission needed: the picked image is granted to us).
+    private val pickGallery =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
+            val uri = r.data?.data
+            if (r.resultCode == RESULT_OK && uri != null) loadFromUri(uri)
+        }
+
+    // Fallback if the device has no gallery app that answers ACTION_PICK.
+    private val pickFile =
         registerForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
             if (uri != null) loadFromUri(uri)
         }
@@ -60,7 +71,17 @@ class EditorActivity : AppCompatActivity() {
         b.toolbar.setNavigationIcon(R.drawable.ic_back)
         b.toolbar.setNavigationOnClickListener { finish() }
 
-        b.btnPick.setOnClickListener { pickImage.launch("image/*") }
+        b.btnPick.setOnClickListener {
+            val gallery = Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI)
+                .setType("image/*")
+            try {
+                pickGallery.launch(gallery)
+            } catch (ex: ActivityNotFoundException) {
+                pickFile.launch("image/*")
+            }
+        }
+        // Samsung launchers handle the old shortcut broadcast better than the new pin API.
+        b.compatMode.isChecked = Build.MANUFACTURER.equals("samsung", ignoreCase = true)
         b.btnOriginal.setOnClickListener { loadOriginalIcon() }
         b.btnRotate.setOnClickListener {
             b.editor.angle = normalize(b.editor.angle + 90f)
@@ -229,7 +250,13 @@ class EditorActivity : AppCompatActivity() {
                 entry = saved
                 sourceDirty = false
                 refreshTexts()
-                when (ShortcutHelper.pinOrUpdate(this, saved, output)) {
+                val result = if (b.compatMode.isChecked) {
+                    ShortcutHelper.pinLegacy(this, saved, output)
+                } else {
+                    ShortcutHelper.pinOrUpdate(this, saved, output)
+                }
+                when (result) {
+                    ShortcutHelper.Result.REQUESTED_LEGACY -> toast(R.string.toast_legacy_sent)
                     ShortcutHelper.Result.REQUESTED -> toast(R.string.toast_pin_requested)
                     ShortcutHelper.Result.UPDATED -> toast(R.string.toast_updated)
                     ShortcutHelper.Result.UNSUPPORTED -> toast(R.string.toast_pin_unsupported)

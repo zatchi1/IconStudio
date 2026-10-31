@@ -175,6 +175,15 @@
                     android:text="@string/btn_reset" />
             </LinearLayout>
 
+            <CheckBox
+                android:id="@+id/compatMode"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="@string/compat_mode"
+                android:textColor="@color/text_primary"
+                android:textSize="13sp" />
+
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"

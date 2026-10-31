@@ -7,6 +7,15 @@ android {
     namespace = "com.iconstudio.app"
     compileSdk = 34
 
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     defaultConfig {
         applicationId = "com.iconstudio.app"
         minSdk = 28          // Android 9

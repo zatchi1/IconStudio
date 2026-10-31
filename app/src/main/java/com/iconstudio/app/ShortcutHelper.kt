@@ -20,7 +20,7 @@ import androidx.core.graphics.drawable.IconCompat
  */
 object ShortcutHelper {
 
-    enum class Result { REQUESTED, UPDATED, UNSUPPORTED, FAILED }
+    enum class Result { REQUESTED, REQUESTED_LEGACY, UPDATED, UNSUPPORTED, FAILED }
 
     fun launchIntent(ctx: Context, e: IconEntry): Intent? {
         val intent: Intent? = if (e.activity.isNotEmpty()) {
@@ -69,6 +69,26 @@ object ShortcutHelper {
                     Result.FAILED
                 }
             }
+        } catch (ex: Exception) {
+            Result.FAILED
+        }
+    }
+
+    /**
+     * Compatibility mode: the old "INSTALL_SHORTCUT" broadcast. The launcher stores the name,
+     * the image and the launch intent itself, so it does not depend on ShortcutManager.
+     * Such a shortcut can't be updated or disabled later: editing creates a new one.
+     */
+    fun pinLegacy(ctx: Context, e: IconEntry, icon: Bitmap): Result {
+        val intent = launchIntent(ctx, e) ?: return Result.FAILED
+        return try {
+            val i = Intent("com.android.launcher.action.INSTALL_SHORTCUT")
+                .putExtra(Intent.EXTRA_SHORTCUT_INTENT, intent)
+                .putExtra(Intent.EXTRA_SHORTCUT_NAME, e.label)
+                .putExtra(Intent.EXTRA_SHORTCUT_ICON, icon)
+                .putExtra("duplicate", true)
+            ctx.sendBroadcast(i)
+            Result.REQUESTED_LEGACY
         } catch (ex: Exception) {
             Result.FAILED
         }
