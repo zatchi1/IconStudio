@@ -97,14 +97,21 @@ object ShortcutHelper {
      * Such a shortcut can't be updated or disabled later: editing creates a new one.
      */
     fun pinLegacy(ctx: Context, e: IconEntry, icon: Bitmap): Result {
-        val intent = launchIntent(ctx, e) ?: return Result.FAILED
+        // Launch the original app directly: the launcher stores this intent itself.
+        val intent = targetIntent(ctx, e.pkg, e.activity) ?: return Result.FAILED
         return try {
             val i = Intent("com.android.launcher.action.INSTALL_SHORTCUT")
                 .putExtra(Intent.EXTRA_SHORTCUT_INTENT, intent)
                 .putExtra(Intent.EXTRA_SHORTCUT_NAME, e.label)
                 .putExtra(Intent.EXTRA_SHORTCUT_ICON, icon)
                 .putExtra("duplicate", true)
-            ctx.sendBroadcast(i)
+            // Android 8+ does not deliver implicit broadcasts to other apps' manifest receivers,
+            // so send it explicitly to every receiver that handles it (the home screen app).
+            val receivers = ctx.packageManager.queryBroadcastReceivers(i, 0)
+            if (receivers.isEmpty()) return Result.UNSUPPORTED
+            for (r in receivers) {
+                ctx.sendBroadcast(Intent(i).setComponent(ComponentName(r.activityInfo.packageName, r.activityInfo.name)))
+            }
             Result.REQUESTED_LEGACY
         } catch (ex: Exception) {
             Result.FAILED

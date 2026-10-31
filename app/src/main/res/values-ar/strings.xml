@@ -29,8 +29,8 @@
     <string name="btn_update">حفظ وتحديث الاختصار</string>
     <string name="editor_note">يضيف هذا اختصارًا مخصصًا إلى الشاشة الرئيسية يفتح التطبيق الأصلي. ولا يغيّر أيقونة التطبيق الأصلية.</string>
 
-    <string name="compat_mode">وضع التوافق (فعّله إذا ظهر الاختصار باسم التطبيق نفسه)</string>
-    <string name="toast_legacy_sent">أُرسل الاختصار إلى الشاشة الرئيسية. إذا لم يظهر شيء فبدّل وضع التوافق (تشغيل أو إيقاف) وجرّب من جديد.</string>
+    <string name="compat_mode">وضع بلا علامة (الطريقة القديمة، أوقفه إذا لم يظهر شيء)</string>
+    <string name="toast_legacy_sent">أُرسل الاختصار إلى الشاشة الرئيسية. إذا لم يظهر شيء فأوقف الوضع بلا علامة وجرّب من جديد.</string>
 
     <string name="delete">حذف</string>
     <string name="dialog_delete_title">حذف هذه الأيقونة؟</string>

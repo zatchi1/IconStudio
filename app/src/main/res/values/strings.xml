@@ -31,8 +31,8 @@
     <string name="btn_update">Save and update shortcut</string>
     <string name="editor_note">This adds a custom shortcut to your home screen that opens the original app. It does not change the original app icon.</string>
 
-    <string name="compat_mode">Compatibility mode (use it if the shortcut shows up as the app itself)</string>
-    <string name="toast_legacy_sent">Shortcut sent to your home screen. If nothing appears, turn compatibility mode on or off and try again.</string>
+    <string name="compat_mode">No-badge mode (old method; turn it off if nothing appears)</string>
+    <string name="toast_legacy_sent">Shortcut sent to your home screen. If nothing appears, turn the no-badge mode off and try again.</string>
 
     <string name="delete">Delete</string>
     <string name="dialog_delete_title">Delete this icon?</string>

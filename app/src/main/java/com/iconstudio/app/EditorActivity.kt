@@ -79,7 +79,7 @@ class EditorActivity : AppCompatActivity() {
                 pickFile.launch("image/*")
             }
         }
-        b.compatMode.isChecked = false
+        b.compatMode.isChecked = true
         b.btnOriginal.setOnClickListener { loadOriginalIcon() }
         b.btnRotate.setOnClickListener {
             b.editor.angle = normalize(b.editor.angle + 90f)
@@ -248,10 +248,14 @@ class EditorActivity : AppCompatActivity() {
                 entry = saved
                 sourceDirty = false
                 refreshTexts()
-                val result = if (b.compatMode.isChecked) {
+                var result = if (b.compatMode.isChecked) {
                     ShortcutHelper.pinLegacy(this, saved, output)
                 } else {
                     ShortcutHelper.pinOrUpdate(this, saved, output)
+                }
+                // No launcher handles the old method: fall back to the standard one.
+                if (b.compatMode.isChecked && result == ShortcutHelper.Result.UNSUPPORTED) {
+                    result = ShortcutHelper.pinOrUpdate(this, saved, output)
                 }
                 when (result) {
                     ShortcutHelper.Result.REQUESTED_LEGACY -> toast(R.string.toast_legacy_sent)
