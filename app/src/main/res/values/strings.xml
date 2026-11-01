@@ -64,6 +64,11 @@
     <string name="widget_unavailable">Widget unavailable</string>
     <string name="toast_widget_failed">Couldn\'t add this widget</string>
 
+    <string name="label_show_name">Show the name under the icon</string>
+    <string name="menu_all_apps">All apps</string>
+    <string name="menu_add_page_before">Add page before this one</string>
+    <string name="menu_add_page_after">Add page after this one</string>
+
     <string name="delete">Delete</string>
     <string name="dialog_delete_title">Delete this icon?</string>
     <string name="dialog_delete_msg">The saved image and settings will be removed and the shortcut will stop working. If its icon is still on your home screen, long-press it and remove it.</string>

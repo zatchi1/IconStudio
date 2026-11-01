@@ -20,7 +20,9 @@ data class IconEntry(
     val bg: Int,
     val updatedAt: Long,
     /** true = icon used by the zatchi home screen; false = icon of a home-screen shortcut. */
-    val launcher: Boolean = false
+    val launcher: Boolean = false,
+    /** Home screen only: draw the name under the icon. */
+    val showLabel: Boolean = true
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id)
@@ -36,6 +38,7 @@ data class IconEntry(
         put("bg", bg)
         put("updatedAt", updatedAt)
         put("launcher", launcher)
+        put("showLabel", showLabel)
     }
 
     companion object {
@@ -52,7 +55,8 @@ data class IconEntry(
             angle = o.optDouble("angle", 0.0).toFloat(),
             bg = o.optInt("bg", 0),
             updatedAt = o.optLong("updatedAt", 0L),
-            launcher = o.optBoolean("launcher", false)
+            launcher = o.optBoolean("launcher", false),
+            showLabel = o.optBoolean("showLabel", true)
         )
     }
 }

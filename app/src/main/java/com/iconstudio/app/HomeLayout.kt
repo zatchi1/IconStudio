@@ -117,6 +117,12 @@ class HomeLayout(ctx: Context) {
         items.add(Placed(key, pages - 1, 0, 0))
     }
 
+    /** Inserts an empty page at index [at], shifting later pages. */
+    fun insertPage(at: Int) {
+        items.filter { it.page >= at }.forEach { it.page++ }
+        pages++
+    }
+
     fun pageIsEmpty(page: Int) = items.none { it.page == page }
 
     fun removePage(page: Int) {

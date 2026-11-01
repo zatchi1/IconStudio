@@ -62,6 +62,11 @@
     <string name="widget_unavailable">الويدجت غير متاح</string>
     <string name="toast_widget_failed">تعذّرت إضافة هذا الويدجت</string>
 
+    <string name="label_show_name">إظهار الاسم تحت الأيقونة</string>
+    <string name="menu_all_apps">كل التطبيقات</string>
+    <string name="menu_add_page_before">إضافة صفحة قبل هذه</string>
+    <string name="menu_add_page_after">إضافة صفحة بعد هذه</string>
+
     <string name="delete">حذف</string>
     <string name="dialog_delete_title">حذف هذه الأيقونة؟</string>
     <string name="dialog_delete_msg">ستُحذف الصورة والإعدادات المحفوظة وسيتوقف الاختصار عن العمل. إن كانت أيقونته ما زالت على الشاشة الرئيسية فاضغط عليها مطولًا ثم أزلها.</string>

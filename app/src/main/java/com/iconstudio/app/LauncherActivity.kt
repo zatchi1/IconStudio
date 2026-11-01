@@ -115,11 +115,6 @@ class LauncherActivity : AppCompatActivity() {
         widgetManager = AppWidgetManager.getInstance(this)
         widgetHost = AppWidgetHost(this, HOST_ID)
 
-        // Draw behind the status and navigation bars; fitsSystemWindows adds the padding back.
-        window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
-            View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
-            View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-
         pageAdapter = PageAdapter()
         b.pager.adapter = pageAdapter
         b.pager.offscreenPageLimit = 1
@@ -133,7 +128,6 @@ class LauncherActivity : AppCompatActivity() {
         b.grid.layoutManager = GridLayoutManager(this, HomeLayout.COLS)
         b.grid.adapter = drawerAdapter
 
-        b.btnApps.setOnClickListener { if (isDrawerOpen()) closeDrawer() else openDrawer(false) }
         b.btnSearch.setOnClickListener { openDrawer(true) }
         b.menuBtn.setOnClickListener { showTopMenu(it) }
 
@@ -283,7 +277,7 @@ class LauncherActivity : AppCompatActivity() {
     private fun cellFor(a: AppItem): Cell {
         val e = custom[a.key]
         val d = e?.let { customDrawable(it) }
-        return if (e != null && d != null) Cell(a, e.label, d, true) else Cell(a, a.label, a.icon, false)
+        return if (e != null && d != null) Cell(a, e.label, d, true, e.showLabel) else Cell(a, a.label, a.icon, false)
     }
 
     private fun render() {
@@ -330,12 +324,22 @@ class LauncherActivity : AppCompatActivity() {
         if (layout.pages <= 1) return
         val cur = b.pager.currentItem
         for (i in 0 until layout.pages) {
-            val dot = View(this)
-            dot.background = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
-                setColor(if (i == cur) Color.WHITE else 0x66FFFFFF)
+            val dot: View
+            if (i == 0) {
+                // The main page is marked with a little house, like the original home screen.
+                dot = ImageView(this).apply {
+                    setImageResource(R.drawable.ic_home_dot)
+                    alpha = if (i == cur) 1f else 0.4f
+                }
+            } else {
+                dot = View(this)
+                dot.background = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(if (i == cur) Color.WHITE else 0x66FFFFFF)
+                }
             }
-            d.addView(dot, LinearLayout.LayoutParams(dp(7), dp(7)).apply {
+            val size = if (i == 0) dp(11) else dp(7)
+            d.addView(dot, LinearLayout.LayoutParams(size, size).apply {
                 marginStart = dp(4)
                 marginEnd = dp(4)
             })
@@ -353,7 +357,7 @@ class LauncherActivity : AppCompatActivity() {
             bindIcon(vb, cell)
             fitIcon(vb)
             vb.root.setOnClickListener { open(cell) }
-            vb.root.setOnLongClickListener { startDrag(it, item) }
+            vb.root.setOnLongClickListener { startDrag(it, item, vb.icon) }
             vb.root
         } else {
             val tb = ItemTileBinding.inflate(layoutInflater)
@@ -367,8 +371,9 @@ class LauncherActivity : AppCompatActivity() {
             tb.tile.outlineProvider = TileOutline
             tb.tile.clipToOutline = true
             tb.label.text = cell.label
+            tb.label.visibility = if (cell.showLabel) View.VISIBLE else View.GONE
             tb.tile.setOnClickListener { open(cell) }
-            tb.tile.setOnLongClickListener { startDrag(it, item) }
+            tb.tile.setOnLongClickListener { startDrag(tb.root, item, tb.tile) }
             tb.root
         }
     }
@@ -382,7 +387,7 @@ class LauncherActivity : AppCompatActivity() {
             val w = r - l
             val h = bt - t
             if (w <= 0 || h <= 0) return@addOnLayoutChangeListener
-            val reserved = dp(22)              // name line + gaps + padding
+            val reserved = if (vb.label.visibility == View.VISIBLE) dp(24) else dp(8)   // name line + gaps
             val s = minOf((w * 0.70f).toInt(), h - reserved).coerceAtLeast(dp(28))
             val lp = vb.icon.layoutParams
             if (lp.width != s || lp.height != s) {
@@ -398,6 +403,7 @@ class LauncherActivity : AppCompatActivity() {
         vb.icon.outlineProvider = IconOutline
         vb.icon.clipToOutline = cell.custom
         vb.label.text = cell.label
+        vb.label.visibility = if (cell.showLabel) View.VISIBLE else View.GONE
     }
 
     private fun renderDock() {
@@ -407,6 +413,7 @@ class LauncherActivity : AppCompatActivity() {
         for (cell in cells) {
             val vb = ItemAppBinding.inflate(layoutInflater, dock, false)
             bindIcon(vb, cell)
+            vb.label.visibility = View.GONE
             vb.root.setOnClickListener { open(cell) }
             vb.root.setOnLongClickListener { showDockMenu(cell); true }
             // Equal share of the full width: spread out like the original home screen.
@@ -417,13 +424,14 @@ class LauncherActivity : AppCompatActivity() {
 
     // ================================================================ drag and drop
 
-    private fun startDrag(v: View, item: Placed): Boolean {
+    /** [shadowOf] is what follows the finger: just the icon/tile, without any frame around it. */
+    private fun startDrag(v: View, item: Placed, shadowOf: View = v): Boolean {
         dragging = true
         v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
         val ok = v.startDragAndDrop(
-            ClipData.newPlainText("item", item.key), View.DragShadowBuilder(v), item, 0
+            ClipData.newPlainText("item", item.key), View.DragShadowBuilder(shadowOf), item, 0
         )
-        if (!ok) dragging = false
+        if (ok) v.alpha = 0.3f else dragging = false
         return ok
     }
 
@@ -541,15 +549,19 @@ class LauncherActivity : AppCompatActivity() {
     private fun showTopMenu(anchor: View) {
         val pm = PopupMenu(this, anchor)
         pm.menu.add(0, 1, 0, R.string.menu_add_widget)
-        pm.menu.add(0, 2, 1, R.string.menu_add_page)
-        pm.menu.add(0, 3, 2, R.string.menu_delete_page)
-        pm.menu.add(0, 4, 3, R.string.menu_shortcuts_mode)
-        pm.menu.add(0, 5, 4, R.string.menu_home_settings)
+        pm.menu.add(0, 2, 1, R.string.menu_add_page_before)
+        pm.menu.add(0, 6, 2, R.string.menu_add_page_after)
+        pm.menu.add(0, 3, 3, R.string.menu_delete_page)
+        pm.menu.add(0, 7, 4, R.string.menu_all_apps)
+        pm.menu.add(0, 4, 5, R.string.menu_shortcuts_mode)
+        pm.menu.add(0, 5, 6, R.string.menu_home_settings)
         pm.setOnMenuItemClickListener {
             when (it.itemId) {
                 1 -> showWidgetPicker()
-                2 -> addPage()
+                2 -> addPageAt(true)
+                6 -> addPageAt(false)
                 3 -> deleteCurrentPage()
+                7 -> openDrawer(false)
                 4 -> startActivity(Intent(this, MainActivity::class.java))
                 5 -> startSafely(Intent(Settings.ACTION_HOME_SETTINGS))
             }
@@ -632,11 +644,13 @@ class LauncherActivity : AppCompatActivity() {
         render()
     }
 
-    private fun addPage() {
-        layout.pages++
+    /** Adds an empty page right before or right after the current one and goes to it. */
+    private fun addPageAt(before: Boolean) {
+        val at = if (before) b.pager.currentItem else b.pager.currentItem + 1
+        layout.insertPage(at)
         layout.save()
-        pageAdapter.notifyItemInserted(layout.pages - 1)
-        b.pager.setCurrentItem(layout.pages - 1, true)
+        pageAdapter.notifyDataSetChanged()
+        b.pager.setCurrentItem(at, false)
         updateDots()
     }
 
@@ -870,7 +884,8 @@ class LauncherActivity : AppCompatActivity() {
             frame.addView(t, FrameLayoutParams.match())
             return frame
         }
-        val hv = widgetHost.createView(this, id, info)
+        // Application context: the AppCompat activity context breaks widget inflation.
+        val hv = widgetHost.createView(applicationContext, id, info)
         frame.addView(hv, FrameLayoutParams.match())
         // Tell the widget how much room it really has, so it picks a matching layout.
         frame.post {

@@ -37,7 +37,8 @@ data class Cell(
     val app: AppItem,
     val label: String,
     val icon: Drawable?,
-    val custom: Boolean
+    val custom: Boolean,
+    val showLabel: Boolean = true
 )
 
 class AppGridAdapter(

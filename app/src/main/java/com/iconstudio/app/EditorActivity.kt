@@ -92,6 +92,8 @@ class EditorActivity : AppCompatActivity() {
         if (applyMode) {
             b.compatMode.visibility = View.GONE
             b.editorNote.visibility = View.GONE
+            b.showName.visibility = View.VISIBLE
+            b.showName.isChecked = entry?.showLabel ?: true
             val size = intent.getIntExtra(EXTRA_SIZE, 0)
             if (size in 1..4) {
                 b.sizeLabel.visibility = View.VISIBLE
@@ -255,7 +257,8 @@ class EditorActivity : AppCompatActivity() {
                     angle = state.angle,
                     bg = state.bg,
                     updatedAt = System.currentTimeMillis(),
-                    launcher = applyMode
+                    launcher = applyMode,
+                    showLabel = if (applyMode) b.showName.isChecked else true
                 )
                 store.upsert(e)
                 e
