@@ -9,27 +9,35 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Point
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Bundle
-import android.os.SystemClock
+import android.os.Handler
+import android.os.Looper
 import android.provider.MediaStore
 import android.provider.Settings
+import android.text.InputType
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.InputMethodManager
+import android.widget.EditText
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.NumberPicker
 import android.widget.PopupMenu
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.core.widget.doAfterTextChanged
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -38,12 +46,14 @@ import androidx.viewpager2.widget.ViewPager2
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.iconstudio.app.databinding.ActivityLauncherBinding
 import com.iconstudio.app.databinding.ItemAppBinding
+import com.iconstudio.app.databinding.ItemFolderBinding
 import com.iconstudio.app.databinding.ItemTileBinding
 import java.util.concurrent.Executors
 
 /**
- * zatchi home screen: swipeable pages, free placement by drag and drop, resizable app tiles,
- * widgets, a dock and an app drawer. Custom icons/names are drawn directly (no shortcuts, no badge).
+ * zatchi home screen: a 2D grid of pages (swipe left/right inside a row, up/down between rows),
+ * free placement by drag and drop, free item sizes, folders, widgets, a dock, an app drawer,
+ * and locked / hidden apps. Custom icons and names are drawn directly (no shortcuts, no badge).
  */
 class LauncherActivity : AppCompatActivity() {
 
@@ -52,9 +62,9 @@ class LauncherActivity : AppCompatActivity() {
         private const val HOST_ID = 1024
         private const val REQUEST_CONFIG = 701
         private const val WIDGET_PREFIX = "widget:"
-        private val WIDGET_SIZES = listOf(
-            2 to 1, 2 to 2, 3 to 1, 3 to 2, 4 to 1, 4 to 2, 4 to 3, 4 to 4, 5 to 1, 5 to 2, 5 to 3, 5 to 4
-        )
+        private const val FOLDER_PREFIX = "folder:"
+        private const val EDGE_DWELL_MS = 700L
+        private const val EDGE_REPEAT_MS = 900L
     }
 
     private lateinit var b: ActivityLauncherBinding
@@ -63,17 +73,23 @@ class LauncherActivity : AppCompatActivity() {
     private lateinit var widgetManager: AppWidgetManager
     private val io = Executors.newSingleThreadExecutor()
     private val density by lazy { resources.displayMetrics.density }
+    private val handler = Handler(Looper.getMainLooper())
 
     private var apps: List<AppItem> = emptyList()
     private var appByKey: Map<String, AppItem> = emptyMap()
     private var custom: Map<String, IconEntry> = emptyMap()
     private val bitmapCache = HashMap<String, Pair<Long, Drawable>>()
 
-    private lateinit var pageAdapter: PageAdapter
+    private lateinit var outerAdapter: OuterAdapter
+    private val rowCol = HashMap<Int, Int>()     // row index -> column currently shown in it
+    private var openedMain = false
+
     private val drawerAdapter = AppGridAdapter({ closeDrawer(); open(it) }, { showDrawerMenu(it) })
 
     private var dragging = false
-    private var lastEdgeAt = 0L
+    private var edgeDx = 0
+    private var edgeDy = 0
+    private val edgeRunnable = Runnable { edgeNavigate() }
 
     private var pendingEditKey: String? = null
     private var pendingWidgetId = -1
@@ -84,9 +100,10 @@ class LauncherActivity : AppCompatActivity() {
             val key = pendingEditKey
             pendingEditKey = null
             if (r.resultCode == RESULT_OK && key != null) {
-                val s = r.data?.getIntExtra(EditorActivity.EXTRA_SIZE, 0) ?: 0
+                val w = r.data?.getIntExtra(EditorActivity.EXTRA_W, 0) ?: 0
+                val h = r.data?.getIntExtra(EditorActivity.EXTRA_H, 0) ?: 0
                 val item = layout.items.firstOrNull { it.key == key }
-                if (item != null && s in 1..4 && (item.w != s || item.h != s)) resize(item, s, s)
+                if (item != null && w >= 1 && h >= 1 && (item.w != w || item.h != h)) resize(item, w, h)
             }
         }
 
@@ -115,8 +132,9 @@ class LauncherActivity : AppCompatActivity() {
         widgetManager = AppWidgetManager.getInstance(this)
         widgetHost = AppWidgetHost(this, HOST_ID)
 
-        pageAdapter = PageAdapter()
-        b.pager.adapter = pageAdapter
+        outerAdapter = OuterAdapter()
+        b.pager.orientation = ViewPager2.ORIENTATION_VERTICAL
+        b.pager.adapter = outerAdapter
         b.pager.offscreenPageLimit = 1
         (b.pager.getChildAt(0) as? RecyclerView)?.overScrollMode = View.OVER_SCROLL_NEVER
         b.pager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
@@ -146,7 +164,7 @@ class LauncherActivity : AppCompatActivity() {
             addAction(Intent.ACTION_PACKAGE_REPLACED)
             addDataScheme("package")
         }
-        registerReceiver(packageReceiver, f)
+        ContextCompat.registerReceiver(this, packageReceiver, f, ContextCompat.RECEIVER_EXPORTED)
         try {
             widgetHost.startListening()
         } catch (e: Exception) {
@@ -175,11 +193,12 @@ class LauncherActivity : AppCompatActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        // Home button pressed while already on the home screen.
+        // Home button pressed while already on the home screen: go to the main page.
         closeDrawer()
-        b.pager.setCurrentItem(0, true)
+        goToPage(layout.mainPage, true)
     }
 
+    @Suppress("OVERRIDE_DEPRECATION", "DEPRECATION")
     override fun onBackPressed() {
         // A home screen never closes. Back only closes the drawer.
         if (isDrawerOpen()) closeDrawer()
@@ -187,6 +206,7 @@ class LauncherActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        handler.removeCallbacksAndMessages(null)
         io.shutdown()
     }
 
@@ -200,6 +220,8 @@ class LauncherActivity : AppCompatActivity() {
     }
 
     private fun dp(v: Int) = (v * density).toInt()
+
+    private fun toast(resId: Int) = Toast.makeText(this, resId, Toast.LENGTH_SHORT).show()
 
     // ================================================================ data
 
@@ -224,23 +246,50 @@ class LauncherActivity : AppCompatActivity() {
         }
     }
 
+    private fun isApp(key: String) = !key.startsWith(WIDGET_PREFIX) && !key.startsWith(FOLDER_PREFIX)
+
+    private fun visibleApps() = apps.filter { it.key !in layout.hidden }
+
     /** Keeps the saved layout in step with what is installed. */
     private fun sync() {
         if (apps.isEmpty()) return
         val keys = apps.map { it.key }.toSet()
-        layout.items.removeAll { !it.key.startsWith(WIDGET_PREFIX) && it.key !in keys }
+        layout.items.removeAll { isApp(it.key) && it.key !in keys }
         layout.dock.removeAll { it !in keys }
-        if (!layout.initialized) {
+        layout.hidden.removeAll { it !in keys }
+        layout.locked.removeAll { it !in keys }
+        for (f in layout.folders.values) f.keys.removeAll { it !in keys }
+        layout.items.removeAll {
+            it.key.startsWith(FOLDER_PREFIX) && !layout.folders.containsKey(it.key.removePrefix(FOLDER_PREFIX))
+        }
+        cleanFolders()
+        val first = !layout.initialized
+        if (first) {
             layout.initialized = true
             defaultDock()
         }
         for (a in apps) {
             // Newly seen apps go on the home screen; apps the user removed from it stay off.
-            if (layout.known.add(a.key) && !layout.isPlaced(a.key) && !layout.dock.contains(a.key)) {
-                layout.addAuto(a.key)
+            if (layout.known.add(a.key) && a.key !in layout.hidden &&
+                !layout.isPlaced(a.key) && !layout.dock.contains(a.key)
+            ) {
+                if (first) layout.addAuto(a.key, layout.mainPage, 0)   // first run: fill pages
+                else placeIfRoom(a.key)                                  // later: never add pages by itself
             }
         }
         layout.save()
+    }
+
+    /** Puts a 1x1 app on the first page with a free cell. Returns false when every page is full. */
+    private fun placeIfRoom(key: String, startPage: Int = layout.mainPage): Boolean {
+        val pages = layout.allPages()
+        val start = pages.indexOf(startPage).coerceAtLeast(0)
+        for (p in pages.drop(start) + pages.take(start)) {
+            val free = layout.findFree(p, 1, 1) ?: continue
+            layout.items.add(Placed(key, p, free.first, free.second))
+            return true
+        }
+        return false
     }
 
     /** First run: phone, messages, camera and browser go to the dock when they can be found. */
@@ -282,19 +331,87 @@ class LauncherActivity : AppCompatActivity() {
 
     private fun render() {
         refreshCustom()
-        pageAdapter.notifyDataSetChanged()
-        updateDots()
+        refreshPages()
         renderDock()
         renderDrawer()
+        if (!openedMain && apps.isNotEmpty()) {
+            openedMain = true
+            goToPage(layout.mainPage, false)
+        }
+        updateDots()
     }
 
-    // ================================================================ pages
+    private fun refreshPages() {
+        outerAdapter.notifyDataSetChanged()
+    }
 
-    private inner class PageAdapter : RecyclerView.Adapter<PageAdapter.VH>() {
+    // ================================================================ pages (2D grid)
+
+    private fun curRow(): Int = b.pager.currentItem.coerceIn(0, layout.grid.size - 1)
+
+    private fun colInRow(row: Int): Int {
+        val pages = layout.grid.getOrNull(row) ?: return 0
+        val c = rowCol[row] ?: pages.indexOf(layout.mainPage).coerceAtLeast(0)
+        return c.coerceIn(0, (pages.size - 1).coerceAtLeast(0))
+    }
+
+    private fun curPageId(): Int {
+        val row = curRow()
+        return layout.grid[row].getOrNull(colInRow(row)) ?: layout.mainPage
+    }
+
+    private fun innerPager(row: Int): ViewPager2? {
+        val rv = b.pager.getChildAt(0) as? RecyclerView ?: return null
+        return (rv.findViewHolderForAdapterPosition(row) as? OuterAdapter.VH)?.pager
+    }
+
+    private fun goToPage(id: Int, smooth: Boolean) {
+        val (r, c) = layout.locate(id) ?: return
+        rowCol[r] = c
+        innerPager(r)?.setCurrentItem(c, smooth)
+        b.pager.setCurrentItem(r, smooth)
+        updateDots()
+    }
+
+    private inner class OuterAdapter : RecyclerView.Adapter<OuterAdapter.VH>() {
+
+        inner class VH(val pager: ViewPager2) : RecyclerView.ViewHolder(pager) {
+            var callback: ViewPager2.OnPageChangeCallback? = null
+        }
+
+        override fun getItemCount(): Int = layout.grid.size
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
+            val p = ViewPager2(parent.context)
+            p.layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
+            )
+            p.isSaveEnabled = false
+            p.offscreenPageLimit = 1
+            (p.getChildAt(0) as? RecyclerView)?.overScrollMode = View.OVER_SCROLL_NEVER
+            return VH(p)
+        }
+
+        override fun onBindViewHolder(holder: VH, position: Int) {
+            holder.callback?.let { holder.pager.unregisterOnPageChangeCallback(it) }
+            holder.pager.adapter = InnerAdapter(position)
+            holder.pager.setCurrentItem(colInRow(position), false)
+            val cb = object : ViewPager2.OnPageChangeCallback() {
+                override fun onPageSelected(pos: Int) {
+                    rowCol[position] = pos
+                    if (b.pager.currentItem == position) updateDots()
+                }
+            }
+            holder.callback = cb
+            holder.pager.registerOnPageChangeCallback(cb)
+        }
+    }
+
+    private inner class InnerAdapter(val row: Int) : RecyclerView.Adapter<InnerAdapter.VH>() {
 
         inner class VH(val grid: HomeGridView) : RecyclerView.ViewHolder(grid)
 
-        override fun getItemCount(): Int = layout.pages
+        override fun getItemCount(): Int = layout.grid.getOrNull(row)?.size ?: 0
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
             val g = HomeGridView(parent.context)
@@ -302,47 +419,64 @@ class LauncherActivity : AppCompatActivity() {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
             )
             g.setPadding(dp(6), dp(2), dp(6), dp(2))
-            g.onDropItem = { item, page, col, row -> onDrop(item, page, col, row) }
-            g.onEdge = { dir -> onEdge(dir) }
+            g.onDropItem = { item, page, col, r, centre -> onDrop(item, page, col, r, centre) }
+            g.onEdge = { dx, dy -> onEdge(dx, dy) }
             g.onDragEnded = { onDragEnded() }
             return VH(g)
         }
 
         override fun onBindViewHolder(holder: VH, position: Int) {
-            holder.grid.pageIndex = position
+            val pageId = layout.grid.getOrNull(row)?.getOrNull(position) ?: return
+            holder.grid.pageIndex = pageId
             holder.grid.removeAllViews()
-            for (item in layout.items.filter { it.page == position }) {
+            for (item in layout.items.filter { it.page == pageId }) {
                 val v = makeView(item) ?: continue
                 holder.grid.addView(v, HomeGridView.LP(item.col, item.row, item.w, item.h))
             }
         }
     }
 
+    private fun dot(active: Boolean, size: Int): View {
+        val v = View(this)
+        v.background = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(if (active) Color.WHITE else 0x66FFFFFF)
+        }
+        v.layoutParams = LinearLayout.LayoutParams(size, size).apply {
+            marginStart = dp(3); marginEnd = dp(3); topMargin = dp(3); bottomMargin = dp(3)
+        }
+        return v
+    }
+
     private fun updateDots() {
+        if (!::layout.isInitialized || !::outerAdapter.isInitialized) return
+        val row = curRow()
+        val pages = layout.grid[row]
+        val cur = colInRow(row)
         val d = b.dots
         d.removeAllViews()
-        if (layout.pages <= 1) return
-        val cur = b.pager.currentItem
-        for (i in 0 until layout.pages) {
-            val dot: View
-            if (i == 0) {
-                // The main page is marked with a little house, like the original home screen.
-                dot = ImageView(this).apply {
-                    setImageResource(R.drawable.ic_home_dot)
-                    alpha = if (i == cur) 1f else 0.4f
-                }
-            } else {
-                dot = View(this)
-                dot.background = GradientDrawable().apply {
-                    shape = GradientDrawable.OVAL
-                    setColor(if (i == cur) Color.WHITE else 0x66FFFFFF)
+        if (pages.size > 1 || pages.firstOrNull() != layout.mainPage) {
+            for ((i, id) in pages.withIndex()) {
+                if (id == layout.mainPage) {
+                    // The main page (chosen by the user) is marked with a little house.
+                    val h = ImageView(this)
+                    h.setImageResource(R.drawable.ic_home_dot)
+                    h.alpha = if (i == cur) 1f else 0.4f
+                    d.addView(h, LinearLayout.LayoutParams(dp(11), dp(11)).apply {
+                        marginStart = dp(4); marginEnd = dp(4)
+                    })
+                } else {
+                    d.addView(dot(i == cur, dp(7)))
                 }
             }
-            val size = if (i == 0) dp(11) else dp(7)
-            d.addView(dot, LinearLayout.LayoutParams(size, size).apply {
-                marginStart = dp(4)
-                marginEnd = dp(4)
-            })
+        }
+        val vd = b.vdots
+        vd.removeAllViews()
+        if (layout.grid.size > 1) {
+            vd.visibility = View.VISIBLE
+            for (r in layout.grid.indices) vd.addView(dot(r == row, dp(6)))
+        } else {
+            vd.visibility = View.GONE
         }
     }
 
@@ -350,14 +484,16 @@ class LauncherActivity : AppCompatActivity() {
 
     private fun makeView(item: Placed): View? {
         if (item.key.startsWith(WIDGET_PREFIX)) return makeWidgetView(item)
+        if (item.key.startsWith(FOLDER_PREFIX)) return makeFolderView(item)
         val app = appByKey[item.key] ?: return null
+        if (app.key in layout.hidden) return null
         val cell = cellFor(app)
         return if (item.w == 1 && item.h == 1) {
             val vb = ItemAppBinding.inflate(layoutInflater)
             bindIcon(vb, cell)
-            fitIcon(vb)
+            fitIcon(vb.root, vb.icon, vb.label)
             vb.root.setOnClickListener { open(cell) }
-            vb.root.setOnLongClickListener { startDrag(it, item, vb.icon) }
+            vb.root.setOnLongClickListener { beginDrag(it, item, vb.icon) }
             vb.root
         } else {
             val tb = ItemTileBinding.inflate(layoutInflater)
@@ -373,27 +509,38 @@ class LauncherActivity : AppCompatActivity() {
             tb.label.text = cell.label
             tb.label.visibility = if (cell.showLabel) View.VISIBLE else View.GONE
             tb.tile.setOnClickListener { open(cell) }
-            tb.tile.setOnLongClickListener { startDrag(tb.root, item, tb.tile) }
+            tb.tile.setOnLongClickListener { beginDrag(tb.root, item, tb.tile) }
             tb.root
         }
+    }
+
+    private fun makeFolderView(item: Placed): View? {
+        val f = layout.folders[item.key.removePrefix(FOLDER_PREFIX)] ?: return null
+        val fb = ItemFolderBinding.inflate(layoutInflater)
+        fb.icon.icons = f.keys.mapNotNull { appByKey[it] }.mapNotNull { cellFor(it).icon }
+        fb.label.text = f.name.ifBlank { getString(R.string.folder_default_name) }
+        fitIcon(fb.root, fb.icon, fb.label)
+        fb.root.setOnClickListener { openFolder(f) }
+        fb.root.setOnLongClickListener { beginDrag(it, item, fb.icon) }
+        return fb.root
     }
 
     /**
      * Sizes the icon from the real cell size so the icon and its name always fit, whatever the
      * screen, instead of using a fixed size that can push the name out of the cell.
      */
-    private fun fitIcon(vb: ItemAppBinding) {
-        vb.root.addOnLayoutChangeListener { _, l, t, r, bt, _, _, _, _ ->
+    private fun fitIcon(root: View, icon: View, label: View) {
+        root.addOnLayoutChangeListener { _, l, t, r, bt, _, _, _, _ ->
             val w = r - l
             val h = bt - t
             if (w <= 0 || h <= 0) return@addOnLayoutChangeListener
-            val reserved = if (vb.label.visibility == View.VISIBLE) dp(24) else dp(8)   // name line + gaps
+            val reserved = if (label.visibility == View.VISIBLE) dp(24) else dp(8)   // name line + gaps
             val s = minOf((w * 0.70f).toInt(), h - reserved).coerceAtLeast(dp(28))
-            val lp = vb.icon.layoutParams
+            val lp = icon.layoutParams
             if (lp.width != s || lp.height != s) {
                 lp.width = s
                 lp.height = s
-                vb.icon.layoutParams = lp
+                icon.layoutParams = lp
             }
         }
     }
@@ -409,7 +556,9 @@ class LauncherActivity : AppCompatActivity() {
     private fun renderDock() {
         val dock = b.dock
         dock.removeAllViews()
-        val cells = layout.dock.mapNotNull { appByKey[it] }.take(DOCK_MAX).map { cellFor(it) }
+        val cells = layout.dock.mapNotNull { appByKey[it] }
+            .filter { it.key !in layout.hidden }
+            .take(DOCK_MAX).map { cellFor(it) }
         for (cell in cells) {
             val vb = ItemAppBinding.inflate(layoutInflater, dock, false)
             bindIcon(vb, cell)
@@ -424,48 +573,109 @@ class LauncherActivity : AppCompatActivity() {
 
     // ================================================================ drag and drop
 
-    /** [shadowOf] is what follows the finger: just the icon/tile, without any frame around it. */
-    private fun startDrag(v: View, item: Placed, shadowOf: View = v): Boolean {
-        dragging = true
+    /** What follows the finger: the icon/tile itself, a bit bigger, with no frame around it. */
+    private class PopShadow(v: View, private val scale: Float) : View.DragShadowBuilder(v) {
+        override fun onProvideShadowMetrics(outShadowSize: Point, outShadowTouchPoint: Point) {
+            val w = (view.width * scale).toInt()
+            val h = (view.height * scale).toInt()
+            outShadowSize.set(w, h)
+            outShadowTouchPoint.set(w / 2, h / 2)
+        }
+
+        override fun onDrawShadow(canvas: Canvas) {
+            canvas.scale(scale, scale)
+            view.draw(canvas)
+        }
+    }
+
+    private fun popScale(item: Placed) = if (item.w * item.h == 1) 1.15f else 1.03f
+
+    /** Long press: a quick "pop" bounce, then the item follows the finger. */
+    private fun beginDrag(v: View, item: Placed, shadowOf: View = v): Boolean {
         v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+        val s = popScale(item)
+        v.animate().scaleX(s).scaleY(s).setDuration(110).withEndAction {
+            v.scaleX = 1f
+            v.scaleY = 1f
+            if (v.isAttachedToWindow) startDrag(v, item, shadowOf)
+        }.start()
+        return true
+    }
+
+    private fun startDrag(v: View, item: Placed, shadowOf: View) {
+        dragging = true
         val ok = v.startDragAndDrop(
-            ClipData.newPlainText("item", item.key), View.DragShadowBuilder(shadowOf), item, 0
+            ClipData.newPlainText("item", item.key), PopShadow(shadowOf, popScale(item)), item, 0
         )
         if (ok) v.alpha = 0.3f else dragging = false
-        return ok
     }
 
-    private fun onEdge(dir: Int) {
-        val now = SystemClock.uptimeMillis()
-        if (now - lastEdgeAt < 800) return
-        val target = b.pager.currentItem + dir
-        if (target < 0) return
-        if (target >= layout.pages) {
-            layout.pages++
-            layout.save()
-            pageAdapter.notifyItemInserted(layout.pages - 1)
+    /**
+     * While dragging at a screen edge, switch to the neighbouring page after a short wait.
+     * Only pages that already exist are visited; pages are never created by dragging.
+     */
+    private fun onEdge(dx: Int, dy: Int) {
+        if (dx == edgeDx && dy == edgeDy) return
+        edgeDx = dx
+        edgeDy = dy
+        handler.removeCallbacks(edgeRunnable)
+        if (dx != 0 || dy != 0) handler.postDelayed(edgeRunnable, EDGE_DWELL_MS)
+    }
+
+    private fun edgeNavigate() {
+        if (!dragging || (edgeDx == 0 && edgeDy == 0)) return
+        val row = curRow()
+        var moved = false
+        if (edgeDx != 0) {
+            val target = colInRow(row) + edgeDx
+            val inner = innerPager(row)
+            if (inner != null && target in 0 until layout.grid[row].size) {
+                inner.setCurrentItem(target, true)
+                moved = true
+            }
+        } else {
+            val target = row + edgeDy
+            if (target in 0 until layout.grid.size) {
+                b.pager.setCurrentItem(target, true)
+                moved = true
+            }
         }
-        lastEdgeAt = now
-        b.pager.setCurrentItem(target, true)
+        if (moved) handler.postDelayed(edgeRunnable, EDGE_REPEAT_MS)
     }
 
-    private fun onDrop(item: Placed, page: Int, col: Int, row: Int) {
+    private fun onDrop(item: Placed, page: Int, col: Int, row: Int, inCentre: Boolean) {
         if (item.page == page && item.col == col && item.row == row) {
             // Picked up and put back in the same place: show the item's menu.
             showItemMenu(item)
             return
         }
+        val other = layout.placedAt(page, col, row, item)
+
+        // App dropped right onto another app (or a folder): make / fill a folder.
+        if (inCentre && other != null && other.w == 1 && other.h == 1 &&
+            item.w == 1 && item.h == 1 && isApp(item.key)
+        ) {
+            if (isApp(other.key)) {
+                val f = layout.newFolder(getString(R.string.folder_default_name), listOf(other.key, item.key))
+                layout.items.remove(item)
+                layout.items.remove(other)
+                layout.items.add(Placed(FOLDER_PREFIX + f.id, other.page, other.col, other.row))
+                layout.save()
+                return
+            }
+            val folder = layout.folders[other.key.removePrefix(FOLDER_PREFIX)]
+            if (folder != null) {
+                folder.keys.add(item.key)
+                layout.items.remove(item)
+                layout.save()
+                return
+            }
+        }
+
         if (layout.fits(page, col, row, item.w, item.h, item)) {
             item.page = page; item.col = col; item.row = row
-        } else {
-            val other = layout.placedAt(page, col, row, item)
-            if (item.w == 1 && item.h == 1 && other != null && other.w == 1 && other.h == 1) {
-                // Dropped on another small icon: swap them.
-                other.page = item.page; other.col = item.col; other.row = item.row
-                item.page = page; item.col = col; item.row = row
-            } else {
-                toast(R.string.toast_no_room)
-            }
+        } else if (!layout.insertWithPush(item, page, col, row)) {
+            toast(R.string.toast_no_room)
         }
         layout.save()
     }
@@ -473,8 +683,215 @@ class LauncherActivity : AppCompatActivity() {
     private fun onDragEnded() {
         if (!dragging) return
         dragging = false
-        pageAdapter.notifyDataSetChanged()
+        edgeDx = 0
+        edgeDy = 0
+        handler.removeCallbacks(edgeRunnable)
+        refreshPages()
         updateDots()
+    }
+
+    // ================================================================ PIN, lock, hide
+
+    private fun pinField(hintRes: Int) = EditText(this).apply {
+        inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
+        setHint(hintRes)
+        maxLines = 1
+    }
+
+    private fun column(vararg views: View) = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(dp(24), dp(8), dp(24), 0)
+        views.forEach { addView(it) }
+    }
+
+    /** Asks for the PIN (when one is set), then runs [onOk]. */
+    private fun askPin(onOk: () -> Unit) {
+        if (!layout.hasPin()) {
+            onOk()
+            return
+        }
+        val f = pinField(R.string.pin_hint)
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.pin_title_enter)
+            .setView(column(f))
+            .setPositiveButton(android.R.string.ok) { _, _ ->
+                if (layout.checkPin(f.text.toString())) onOk() else toast(R.string.pin_wrong)
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    /** Makes sure a PIN exists (asking the user to create one the first time), then runs [onOk]. */
+    private fun ensurePin(onOk: () -> Unit) {
+        if (layout.hasPin()) {
+            onOk()
+            return
+        }
+        val a = pinField(R.string.pin_hint)
+        val c = pinField(R.string.pin_confirm_hint)
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.pin_title_set)
+            .setView(column(a, c))
+            .setPositiveButton(android.R.string.ok) { _, _ ->
+                val p = a.text.toString()
+                when {
+                    p.length < 4 -> toast(R.string.pin_short)
+                    p != c.text.toString() -> toast(R.string.pin_mismatch)
+                    else -> {
+                        layout.setPin(p)
+                        layout.save()
+                        onOk()
+                    }
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun lockApp(app: AppItem) = ensurePin {
+        layout.locked.add(app.key)
+        layout.save()
+        toast(R.string.toast_locked)
+    }
+
+    private fun unlockApp(app: AppItem) = askPin {
+        layout.locked.remove(app.key)
+        layout.save()
+        toast(R.string.toast_unlocked)
+    }
+
+    private fun hideApp(app: AppItem) = ensurePin {
+        layout.hidden.add(app.key)
+        layout.items.removeAll { it.key == app.key }
+        layout.dock.remove(app.key)
+        for (f in layout.folders.values) f.keys.remove(app.key)
+        cleanFolders()
+        layout.save()
+        render()
+        toast(R.string.toast_hidden)
+    }
+
+    private fun unhideApp(app: AppItem) {
+        layout.hidden.remove(app.key)
+        if (!layout.isPlaced(app.key) && !layout.dock.contains(app.key)) {
+            if (!placeIfRoom(app.key, curPageId())) layout.addAuto(app.key, curPageId(), curRow())
+        }
+        layout.save()
+        render()
+    }
+
+    private fun showHiddenApps() {
+        if (layout.hidden.isEmpty()) {
+            toast(R.string.toast_no_hidden)
+            return
+        }
+        askPin {
+            val list = layout.hidden.mapNotNull { appByKey[it] }.map { cellFor(it) }
+                .sortedBy { it.label.lowercase() }
+            if (list.isEmpty()) {
+                toast(R.string.toast_no_hidden)
+            } else {
+                showActions(
+                    getString(R.string.menu_hidden_apps),
+                    list.map { c ->
+                        c.label to {
+                            showActions(
+                                c.label,
+                                listOf(
+                                    getString(R.string.menu_open) to { launch(c) },
+                                    getString(R.string.menu_unhide) to { unhideApp(c.app) }
+                                )
+                            )
+                        }
+                    }
+                )
+            }
+        }
+    }
+
+    // ================================================================ folders
+
+    /** Folders with fewer than two apps are dissolved (the remaining app takes the folder's place). */
+    private fun cleanFolders() {
+        for (f in layout.folders.values.toList()) {
+            if (f.keys.size >= 2) continue
+            val fi = layout.items.firstOrNull { it.key == FOLDER_PREFIX + f.id }
+            layout.folders.remove(f.id)
+            if (fi != null) {
+                layout.items.remove(fi)
+                f.keys.firstOrNull()?.let { layout.items.add(Placed(it, fi.page, fi.col, fi.row)) }
+            }
+        }
+    }
+
+    private fun dissolveFolder(f: Folder) {
+        val fi = layout.items.firstOrNull { it.key == FOLDER_PREFIX + f.id }
+        val page = fi?.page ?: curPageId()
+        layout.folders.remove(f.id)
+        if (fi != null) layout.items.remove(fi)
+        f.keys.forEachIndexed { i, k ->
+            if (i == 0 && fi != null) layout.items.add(Placed(k, fi.page, fi.col, fi.row))
+            else layout.addAuto(k, page, curRow())
+        }
+        layout.save()
+        render()
+    }
+
+    private fun removeFromFolder(f: Folder, key: String) {
+        val fi = layout.items.firstOrNull { it.key == FOLDER_PREFIX + f.id }
+        f.keys.remove(key)
+        layout.addAuto(key, fi?.page ?: curPageId(), curRow())
+        cleanFolders()
+        layout.save()
+        render()
+    }
+
+    private fun renameFolder(f: Folder) {
+        val e = EditText(this)
+        e.setText(f.name)
+        e.setSelection(e.text.length)
+        e.maxLines = 1
+        e.inputType = InputType.TYPE_CLASS_TEXT
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.menu_rename)
+            .setView(column(e))
+            .setPositiveButton(android.R.string.ok) { _, _ ->
+                f.name = e.text.toString().trim()
+                layout.save()
+                refreshPages()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun openFolder(f: Folder) {
+        val rv = RecyclerView(this)
+        rv.layoutManager = GridLayoutManager(this, 4)
+        rv.setPadding(dp(8), dp(8), dp(8), dp(8))
+        var dlg: AlertDialog? = null
+        val ad = AppGridAdapter(
+            { cell -> dlg?.dismiss(); open(cell) },
+            { cell ->
+                dlg?.dismiss()
+                showActions(
+                    cell.label,
+                    listOf(
+                        getString(R.string.menu_open) to { open(cell) },
+                        getString(R.string.menu_remove_from_folder) to { removeFromFolder(f, cell.app.key) },
+                        getString(R.string.menu_change_icon) to { openEditor(cell, 0, 0) }
+                    )
+                )
+            }
+        )
+        ad.submit(f.keys.mapNotNull { appByKey[it] }.map { cellFor(it) })
+        rv.adapter = ad
+        dlg = MaterialAlertDialogBuilder(this)
+            .setTitle(f.name.ifBlank { getString(R.string.folder_default_name) })
+            .setView(rv)
+            .setPositiveButton(R.string.menu_rename) { _, _ -> renameFolder(f) }
+            .setNeutralButton(R.string.menu_dissolve) { _, _ -> dissolveFolder(f) }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
     }
 
     // ================================================================ menus
@@ -486,19 +903,38 @@ class LauncherActivity : AppCompatActivity() {
             .show()
     }
 
+    private fun lockActions(app: AppItem, into: MutableList<Pair<String, () -> Unit>>) {
+        if (app.key in layout.locked) into.add(getString(R.string.menu_unlock) to { unlockApp(app) })
+        else into.add(getString(R.string.menu_lock) to { lockApp(app) })
+        into.add(getString(R.string.menu_hide) to { hideApp(app) })
+    }
+
     private fun showItemMenu(item: Placed) {
         if (item.key.startsWith(WIDGET_PREFIX)) {
             showWidgetMenu(item)
             return
         }
+        if (item.key.startsWith(FOLDER_PREFIX)) {
+            val f = layout.folders[item.key.removePrefix(FOLDER_PREFIX)] ?: return
+            showActions(
+                f.name.ifBlank { getString(R.string.folder_default_name) },
+                listOf(
+                    getString(R.string.menu_open) to { openFolder(f) },
+                    getString(R.string.menu_rename) to { renameFolder(f) },
+                    getString(R.string.menu_dissolve) to { dissolveFolder(f) }
+                )
+            )
+            return
+        }
         val app = appByKey[item.key] ?: return
         val cell = cellFor(app)
         val actions = ArrayList<Pair<String, () -> Unit>>()
-        actions.add(getString(R.string.menu_change_icon) to { openEditor(cell, if (item.w == item.h) item.w else 1) })
+        actions.add(getString(R.string.menu_change_icon) to { openEditor(cell, item.w, item.h) })
         if (cell.custom) actions.add(getString(R.string.menu_reset_icon) to { resetIcon(app) })
-        actions.add(getString(R.string.menu_size) to { showSizeDialog(item, false) })
+        actions.add(getString(R.string.menu_size) to { showSizeDialog(item) })
         actions.add(getString(R.string.menu_add_dock) to { moveToDock(app.key) })
         actions.add(getString(R.string.menu_remove_home) to { removeFromHome(app.key) })
+        lockActions(app, actions)
         actions.add(getString(R.string.menu_app_info) to { appInfo(app) })
         actions.add(getString(R.string.menu_uninstall) to { uninstall(app) })
         showActions(cell.label, actions)
@@ -507,9 +943,10 @@ class LauncherActivity : AppCompatActivity() {
     private fun showDockMenu(cell: Cell) {
         val app = cell.app
         val actions = ArrayList<Pair<String, () -> Unit>>()
-        actions.add(getString(R.string.menu_change_icon) to { openEditor(cell, 0) })
+        actions.add(getString(R.string.menu_change_icon) to { openEditor(cell, 0, 0) })
         if (cell.custom) actions.add(getString(R.string.menu_reset_icon) to { resetIcon(app) })
         actions.add(getString(R.string.menu_to_home) to { moveToHome(app.key) })
+        lockActions(app, actions)
         actions.add(getString(R.string.menu_app_info) to { appInfo(app) })
         actions.add(getString(R.string.menu_uninstall) to { uninstall(app) })
         showActions(cell.label, actions)
@@ -520,10 +957,11 @@ class LauncherActivity : AppCompatActivity() {
         val onHome = layout.isPlaced(app.key)
         val inDock = layout.dock.contains(app.key)
         val actions = ArrayList<Pair<String, () -> Unit>>()
-        actions.add(getString(R.string.menu_change_icon) to { closeDrawer(); openEditor(cell, 0) })
+        actions.add(getString(R.string.menu_change_icon) to { closeDrawer(); openEditor(cell, 0, 0) })
         if (cell.custom) actions.add(getString(R.string.menu_reset_icon) to { resetIcon(app) })
         if (!onHome) actions.add(getString(R.string.menu_add_home) to { closeDrawer(); moveToHome(app.key) })
         if (!inDock) actions.add(getString(R.string.menu_add_dock) to { moveToDock(app.key) })
+        lockActions(app, actions)
         actions.add(getString(R.string.menu_app_info) to { appInfo(app) })
         actions.add(getString(R.string.menu_uninstall) to { uninstall(app) })
         showActions(cell.label, actions)
@@ -531,48 +969,116 @@ class LauncherActivity : AppCompatActivity() {
 
     private fun showWidgetMenu(item: Placed) {
         val actions = ArrayList<Pair<String, () -> Unit>>()
-        actions.add(getString(R.string.menu_size) to { showSizeDialog(item, true) })
+        actions.add(getString(R.string.menu_size) to { showSizeDialog(item) })
         actions.add(getString(R.string.menu_remove_widget) to { removeWidget(item) })
         showActions(getString(R.string.title_widgets), actions)
     }
 
-    private fun showSizeDialog(item: Placed, widget: Boolean) {
-        val sizes = if (widget) WIDGET_SIZES else listOf(1 to 1, 2 to 2, 3 to 3, 4 to 4)
+    /** Free size: any width (1..5) x height (1..6) that fits. */
+    private fun showSizeDialog(item: Placed) {
+        val pw = NumberPicker(this)
+        pw.minValue = 1; pw.maxValue = HomeLayout.COLS; pw.value = item.w; pw.wrapSelectorWheel = false
+        val ph = NumberPicker(this)
+        ph.minValue = 1; ph.maxValue = HomeLayout.ROWS; ph.value = item.h; ph.wrapSelectorWheel = false
+        val x = TextView(this)
+        x.text = "×"
+        x.textSize = 24f
+        x.setPadding(dp(20), 0, dp(20), 0)
+        val row = LinearLayout(this)
+        row.gravity = Gravity.CENTER
+        row.orientation = LinearLayout.HORIZONTAL
+        row.setPadding(0, dp(12), 0, 0)
+        row.addView(pw)
+        row.addView(x)
+        row.addView(ph)
         MaterialAlertDialogBuilder(this)
             .setTitle(R.string.menu_size)
-            .setItems(sizes.map { "${it.first}×${it.second}" }.toTypedArray()) { _, i ->
-                resize(item, sizes[i].first, sizes[i].second)
-            }
+            .setView(row)
+            .setPositiveButton(android.R.string.ok) { _, _ -> resize(item, pw.value, ph.value) }
+            .setNegativeButton(android.R.string.cancel, null)
             .show()
     }
 
     private fun showTopMenu(anchor: View) {
         val pm = PopupMenu(this, anchor)
         pm.menu.add(0, 1, 0, R.string.menu_add_widget)
-        pm.menu.add(0, 2, 1, R.string.menu_add_page_before)
-        pm.menu.add(0, 6, 2, R.string.menu_add_page_after)
-        pm.menu.add(0, 3, 3, R.string.menu_delete_page)
-        pm.menu.add(0, 7, 4, R.string.menu_all_apps)
-        pm.menu.add(0, 4, 5, R.string.menu_shortcuts_mode)
-        pm.menu.add(0, 5, 6, R.string.menu_home_settings)
+        pm.menu.add(0, 2, 1, R.string.menu_pages)
+        pm.menu.add(0, 3, 2, R.string.menu_hidden_apps)
+        pm.menu.add(0, 4, 3, R.string.menu_all_apps)
+        pm.menu.add(0, 5, 4, R.string.menu_shortcuts_mode)
+        pm.menu.add(0, 6, 5, R.string.menu_home_settings)
         pm.setOnMenuItemClickListener {
             when (it.itemId) {
                 1 -> showWidgetPicker()
-                2 -> addPageAt(true)
-                6 -> addPageAt(false)
-                3 -> deleteCurrentPage()
-                7 -> openDrawer(false)
-                4 -> startActivity(Intent(this, MainActivity::class.java))
-                5 -> startSafely(Intent(Settings.ACTION_HOME_SETTINGS))
+                2 -> showPagesMenu()
+                3 -> showHiddenApps()
+                4 -> openDrawer(false)
+                5 -> startActivity(Intent(this, MainActivity::class.java))
+                6 -> startSafely(Intent(Settings.ACTION_HOME_SETTINGS))
             }
             true
         }
         pm.show()
     }
 
+    /** Add pages on any side, move the current page, choose the main page, delete an empty page. */
+    private fun showPagesMenu() {
+        val id = curPageId()
+        val (r, c) = layout.locate(id) ?: return
+        val a = ArrayList<Pair<String, () -> Unit>>()
+        a.add(getString(R.string.menu_page_left) to { addPageAndGo(layout.addPageInRow(r, c)) })
+        a.add(getString(R.string.menu_page_right) to { addPageAndGo(layout.addPageInRow(r, c + 1)) })
+        a.add(getString(R.string.menu_page_above) to { addPageAndGo(layout.addRow(r)) })
+        a.add(getString(R.string.menu_page_below) to { addPageAndGo(layout.addRow(r + 1)) })
+        a.add(getString(R.string.page_move_left) to { movePage(id) { layout.movePageHorizontal(id, -1) } })
+        a.add(getString(R.string.page_move_right) to { movePage(id) { layout.movePageHorizontal(id, 1) } })
+        a.add(getString(R.string.page_move_up) to { movePage(id) { layout.movePageVertical(id, -1) } })
+        a.add(getString(R.string.page_move_down) to { movePage(id) { layout.movePageVertical(id, 1) } })
+        a.add(getString(R.string.page_set_main) to {
+            layout.mainPage = id
+            layout.save()
+            updateDots()
+            toast(R.string.toast_main_set)
+        })
+        a.add(getString(R.string.menu_delete_page) to { deletePage(id) })
+        showActions(getString(R.string.menu_pages), a)
+    }
+
+    private fun addPageAndGo(newId: Int) {
+        layout.save()
+        rowCol.clear()
+        refreshPages()
+        goToPage(newId, false)
+    }
+
+    private fun movePage(id: Int, op: () -> Boolean) {
+        if (!op()) return
+        layout.save()
+        rowCol.clear()
+        refreshPages()
+        goToPage(id, false)
+    }
+
+    private fun deletePage(id: Int) {
+        if (layout.allPages().size <= 1 || !layout.pageIsEmpty(id)) {
+            toast(R.string.toast_page_not_empty)
+            return
+        }
+        layout.removePage(id)
+        layout.save()
+        rowCol.clear()
+        refreshPages()
+        goToPage(layout.mainPage, false)
+    }
+
     // ================================================================ actions
 
+    /** Opens the app, asking for the PIN first when it is locked. */
     private fun open(cell: Cell) {
+        if (cell.app.key in layout.locked) askPin { launch(cell) } else launch(cell)
+    }
+
+    private fun launch(cell: Cell) {
         val intent = ShortcutHelper.targetIntent(this, cell.app.pkg, cell.app.activity)
         try {
             if (intent == null) throw IllegalStateException("missing")
@@ -582,8 +1088,8 @@ class LauncherActivity : AppCompatActivity() {
         }
     }
 
-    /** [size] is the tile size (1..4) shown in the editor, or 0 to hide the size picker. */
-    private fun openEditor(cell: Cell, size: Int) {
+    /** [w] x [h] is the tile size shown in the editor, or 0 x 0 to hide the size picker. */
+    private fun openEditor(cell: Cell, w: Int, h: Int) {
         pendingEditKey = cell.app.key
         editorResult.launch(
             Intent(this, EditorActivity::class.java)
@@ -591,7 +1097,8 @@ class LauncherActivity : AppCompatActivity() {
                 .putExtra(EditorActivity.EXTRA_ACTIVITY, cell.app.activity)
                 .putExtra(EditorActivity.EXTRA_APP_LABEL, cell.app.label)
                 .putExtra(EditorActivity.EXTRA_APPLY_MODE, true)
-                .putExtra(EditorActivity.EXTRA_SIZE, size)
+                .putExtra(EditorActivity.EXTRA_W, w)
+                .putExtra(EditorActivity.EXTRA_H, h)
         )
     }
 
@@ -603,6 +1110,7 @@ class LauncherActivity : AppCompatActivity() {
     }
 
     private fun resize(item: Placed, w: Int, h: Int) {
+        if (item.w == w && item.h == h) return
         var col = item.col.coerceAtMost(HomeLayout.COLS - w)
         var row = item.row.coerceAtMost(HomeLayout.ROWS - h)
         if (!layout.fits(item.page, col, row, w, h, item)) {
@@ -616,7 +1124,8 @@ class LauncherActivity : AppCompatActivity() {
         }
         item.col = col; item.row = row; item.w = w; item.h = h
         layout.save()
-        pageAdapter.notifyDataSetChanged()
+        refreshPages()
+        if (item.key.startsWith(WIDGET_PREFIX)) return
     }
 
     private fun moveToDock(key: String) {
@@ -626,6 +1135,8 @@ class LauncherActivity : AppCompatActivity() {
             return
         }
         layout.items.removeAll { it.key == key }
+        for (f in layout.folders.values) f.keys.remove(key)
+        cleanFolders()
         layout.dock.add(key)
         layout.save()
         render()
@@ -633,34 +1144,15 @@ class LauncherActivity : AppCompatActivity() {
 
     private fun moveToHome(key: String) {
         layout.dock.remove(key)
-        if (!layout.isPlaced(key)) layout.addAuto(key, b.pager.currentItem)
+        if (!layout.isPlaced(key)) layout.addAuto(key, curPageId(), curRow())
         layout.save()
         render()
     }
 
     private fun removeFromHome(key: String) {
         layout.items.removeAll { it.key == key }
-        layout.save()
-        render()
-    }
-
-    /** Adds an empty page right before or right after the current one and goes to it. */
-    private fun addPageAt(before: Boolean) {
-        val at = if (before) b.pager.currentItem else b.pager.currentItem + 1
-        layout.insertPage(at)
-        layout.save()
-        pageAdapter.notifyDataSetChanged()
-        b.pager.setCurrentItem(at, false)
-        updateDots()
-    }
-
-    private fun deleteCurrentPage() {
-        val p = b.pager.currentItem
-        if (layout.pages <= 1 || !layout.pageIsEmpty(p)) {
-            toast(R.string.toast_page_not_empty)
-            return
-        }
-        layout.removePage(p)
+        for (f in layout.folders.values) f.keys.remove(key)
+        cleanFolders()
         layout.save()
         render()
     }
@@ -678,8 +1170,6 @@ class LauncherActivity : AppCompatActivity() {
             toast(R.string.toast_failed)
         }
     }
-
-    private fun toast(resId: Int) = Toast.makeText(this, resId, Toast.LENGTH_SHORT).show()
 
     // ================================================================ drawer
 
@@ -710,7 +1200,7 @@ class LauncherActivity : AppCompatActivity() {
 
     private fun renderDrawer() {
         val q = b.search.text.toString().trim().lowercase()
-        val cells = apps.map { cellFor(it) }
+        val cells = visibleApps().map { cellFor(it) }
         val shown = if (q.isEmpty()) cells else cells.filter {
             it.label.lowercase().contains(q) || it.app.label.lowercase().contains(q)
         }
@@ -764,7 +1254,7 @@ class LauncherActivity : AppCompatActivity() {
                 }
                 val list = RecyclerView(this)
                 list.layoutManager = LinearLayoutManager(this)
-                var dialog: androidx.appcompat.app.AlertDialog? = null
+                var dialog: AlertDialog? = null
                 list.adapter = WidgetAdapter(options) {
                     dialog?.dismiss()
                     addWidget(it.info)
@@ -825,22 +1315,28 @@ class LauncherActivity : AppCompatActivity() {
         pendingWidgetId = -1
         if (info == null || id == -1) return
         val (w, h) = widgetCells(info)
-        val start = b.pager.currentItem
+        val pages = layout.allPages()
+        val start = pages.indexOf(curPageId()).coerceAtLeast(0)
         var placed: Placed? = null
-        for (p in (start until layout.pages) + (0 until start)) {
+        for (p in pages.drop(start) + pages.take(start)) {
             val free = layout.findFree(p, w, h) ?: continue
             placed = Placed(WIDGET_PREFIX + id, p, free.first, free.second, w, h)
             break
         }
         if (placed == null) {
-            layout.pages++
-            placed = Placed(WIDGET_PREFIX + id, layout.pages - 1, 0, 0, w, h)
+            // No page has room: pages are only ever created by the user.
+            try {
+                widgetHost.deleteAppWidgetId(id)
+            } catch (e: Exception) {
+                // ignore
+            }
+            toast(R.string.toast_no_room)
+            return
         }
         layout.items.add(placed)
         layout.save()
-        pageAdapter.notifyDataSetChanged()
-        b.pager.setCurrentItem(placed.page, false)
-        updateDots()
+        refreshPages()
+        goToPage(placed.page, false)
     }
 
     private fun cancelPendingWidget() {
@@ -866,7 +1362,7 @@ class LauncherActivity : AppCompatActivity() {
         }
         layout.items.remove(item)
         layout.save()
-        pageAdapter.notifyDataSetChanged()
+        refreshPages()
     }
 
     private fun makeWidgetView(item: Placed): View? {
@@ -874,19 +1370,19 @@ class LauncherActivity : AppCompatActivity() {
         val info = widgetManager.getAppWidgetInfo(id)
         val frame = WidgetFrame(this)
         frame.setPadding(dp(4), dp(4), dp(4), dp(4))
-        frame.onLongPress = { startDrag(frame, item) }
+        frame.onLongPress = { beginDrag(frame, item) }
         if (info == null) {
             val t = TextView(this)
             t.setText(R.string.widget_unavailable)
             t.setTextColor(Color.WHITE)
             t.gravity = Gravity.CENTER
             t.setBackgroundResource(R.drawable.bg_tile)
-            frame.addView(t, FrameLayoutParams.match())
+            frame.addView(t, matchParams())
             return frame
         }
         // Application context: the AppCompat activity context breaks widget inflation.
         val hv = widgetHost.createView(applicationContext, id, info)
-        frame.addView(hv, FrameLayoutParams.match())
+        frame.addView(hv, matchParams())
         // Tell the widget how much room it really has, so it picks a matching layout.
         frame.post {
             val wDp = (frame.width / density).toInt()
@@ -896,9 +1392,7 @@ class LauncherActivity : AppCompatActivity() {
         return frame
     }
 
-    private object FrameLayoutParams {
-        fun match() = android.widget.FrameLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
-        )
-    }
+    private fun matchParams() = android.widget.FrameLayout.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
+    )
 }

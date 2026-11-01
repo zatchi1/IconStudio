@@ -16,8 +16,8 @@ class HomeGridView(ctx: Context) : ViewGroup(ctx) {
         ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
 
     var pageIndex = 0
-    var onDropItem: ((Placed, Int, Int, Int) -> Unit)? = null
-    var onEdge: ((Int) -> Unit)? = null
+    var onDropItem: ((Placed, Int, Int, Int, Boolean) -> Unit)? = null   // item, page, col, row, inCentre
+    var onEdge: ((Int, Int) -> Unit)? = null   // (dx, dy); (0,0) = not at an edge
     var onDragEnded: (() -> Unit)? = null
 
     init {
@@ -66,8 +66,10 @@ class HomeGridView(ctx: Context) : ViewGroup(ctx) {
         when (e.action) {
             DragEvent.ACTION_DRAG_STARTED -> return item != null
             DragEvent.ACTION_DRAG_LOCATION -> {
-                val edge = 40 * resources.displayMetrics.density
-                if (e.x < edge) onEdge?.invoke(-1) else if (e.x > width - edge) onEdge?.invoke(1)
+                val edge = 28 * resources.displayMetrics.density
+                val dx = if (e.x < edge) -1 else if (e.x > width - edge) 1 else 0
+                val dy = if (dx != 0) 0 else if (e.y < edge) -1 else if (e.y > height - edge) 1 else 0
+                onEdge?.invoke(dx, dy)
                 return true
             }
             DragEvent.ACTION_DROP -> {
@@ -78,7 +80,12 @@ class HomeGridView(ctx: Context) : ViewGroup(ctx) {
                     .coerceIn(0, HomeLayout.COLS - item.w)
                 val row = ((e.y - paddingTop) / ch - item.h / 2f).roundToInt()
                     .coerceIn(0, HomeLayout.ROWS - item.h)
-                onDropItem?.invoke(item, pageIndex, col, row)
+                val fx = (e.x - paddingLeft) / cw
+                val fy = (e.y - paddingTop) / ch
+                val centre = item.w == 1 && item.h == 1 &&
+                    (fx - Math.floor(fx.toDouble())) in 0.25..0.75 &&
+                    (fy - Math.floor(fy.toDouble())) in 0.2..0.8
+                onDropItem?.invoke(item, pageIndex, col, row, centre)
                 return true
             }
             DragEvent.ACTION_DRAG_ENDED -> {

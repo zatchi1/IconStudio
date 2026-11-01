@@ -7,8 +7,10 @@
     <!-- Needed only to list launchable apps on Android 11+. Ignored on Android 9.
          No INTERNET permission: nothing ever leaves the phone. -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+    <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
 
     <application
+        android:resizeableActivity="true"
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"

@@ -19,10 +19,9 @@ android {
     defaultConfig {
         applicationId = "com.iconstudio.app"
         minSdk = 24
-        // Deliberately low: apps built for old Android versions get the launcher's
-        // "install shortcut" permission automatically, which makes the badge-free
-        // shortcut method work on Samsung One UI (Android 9).
-        targetSdk = 25
+        // Current Android; also fine on Android 9. (A target below 26 makes Android letterbox
+        // the app on tall screens, leaving a gap at the bottom.)
+        targetSdk = 34
         versionCode = 1
         versionName = "1.0"
     }

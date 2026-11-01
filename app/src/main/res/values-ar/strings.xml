@@ -67,6 +67,40 @@
     <string name="menu_add_page_before">إضافة صفحة قبل هذه</string>
     <string name="menu_add_page_after">إضافة صفحة بعد هذه</string>
 
+    <string name="menu_page_left">إضافة صفحة على اليسار</string>
+    <string name="menu_page_right">إضافة صفحة على اليمين</string>
+    <string name="menu_page_above">إضافة صفحة فوق</string>
+    <string name="menu_page_below">إضافة صفحة تحت</string>
+
+    <string name="menu_lock">قفل التطبيق (PIN)</string>
+    <string name="menu_unlock">إزالة القفل</string>
+    <string name="menu_hide">إخفاء التطبيق</string>
+    <string name="menu_unhide">إظهاره من جديد</string>
+    <string name="menu_hidden_apps">التطبيقات المخفية</string>
+    <string name="menu_pages">الصفحات…</string>
+    <string name="menu_open">فتح</string>
+    <string name="menu_rename">إعادة تسمية</string>
+    <string name="menu_dissolve">تفكيك المجلد</string>
+    <string name="menu_remove_from_folder">إخراج من المجلد</string>
+    <string name="folder_default_name">مجلد</string>
+    <string name="pin_title_set">اختر رمز PIN (٤ أرقام أو أكثر)</string>
+    <string name="pin_title_enter">أدخل رمز PIN</string>
+    <string name="pin_hint">رمز PIN</string>
+    <string name="pin_confirm_hint">أعد كتابة الرمز</string>
+    <string name="pin_wrong">الرمز خاطئ</string>
+    <string name="pin_mismatch">الرمزان غير متطابقين</string>
+    <string name="pin_short">٤ أرقام على الأقل</string>
+    <string name="toast_locked">تم قفل التطبيق</string>
+    <string name="toast_unlocked">تمت إزالة القفل</string>
+    <string name="toast_hidden">تم إخفاء التطبيق (القائمة ثم التطبيقات المخفية)</string>
+    <string name="toast_no_hidden">لا توجد تطبيقات مخفية</string>
+    <string name="page_move_left">نقل هذه الصفحة لليسار</string>
+    <string name="page_move_right">نقل هذه الصفحة لليمين</string>
+    <string name="page_move_up">نقل هذه الصفحة للأعلى</string>
+    <string name="page_move_down">نقل هذه الصفحة للأسفل</string>
+    <string name="page_set_main">جعل هذه الصفحة الرئيسية</string>
+    <string name="toast_main_set">تم تعيين الصفحة الرئيسية</string>
+
     <string name="delete">حذف</string>
     <string name="dialog_delete_title">حذف هذه الأيقونة؟</string>
     <string name="dialog_delete_msg">ستُحذف الصورة والإعدادات المحفوظة وسيتوقف الاختصار عن العمل. إن كانت أيقونته ما زالت على الشاشة الرئيسية فاضغط عليها مطولًا ثم أزلها.</string>

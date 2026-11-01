@@ -69,6 +69,40 @@
     <string name="menu_add_page_before">Add page before this one</string>
     <string name="menu_add_page_after">Add page after this one</string>
 
+    <string name="menu_page_left">Add page on the left</string>
+    <string name="menu_page_right">Add page on the right</string>
+    <string name="menu_page_above">Add page above</string>
+    <string name="menu_page_below">Add page below</string>
+
+    <string name="menu_lock">Lock app (PIN)</string>
+    <string name="menu_unlock">Remove lock</string>
+    <string name="menu_hide">Hide app</string>
+    <string name="menu_unhide">Show again</string>
+    <string name="menu_hidden_apps">Hidden apps</string>
+    <string name="menu_pages">Pages…</string>
+    <string name="menu_open">Open</string>
+    <string name="menu_rename">Rename</string>
+    <string name="menu_dissolve">Dissolve folder</string>
+    <string name="menu_remove_from_folder">Remove from folder</string>
+    <string name="folder_default_name">Folder</string>
+    <string name="pin_title_set">Set a PIN (4 digits or more)</string>
+    <string name="pin_title_enter">Enter your PIN</string>
+    <string name="pin_hint">PIN</string>
+    <string name="pin_confirm_hint">Repeat the PIN</string>
+    <string name="pin_wrong">Wrong PIN</string>
+    <string name="pin_mismatch">The two PINs don\'t match</string>
+    <string name="pin_short">At least 4 digits</string>
+    <string name="toast_locked">App locked</string>
+    <string name="toast_unlocked">Lock removed</string>
+    <string name="toast_hidden">App hidden (Menu → Hidden apps)</string>
+    <string name="toast_no_hidden">No hidden apps</string>
+    <string name="page_move_left">Move this page left</string>
+    <string name="page_move_right">Move this page right</string>
+    <string name="page_move_up">Move this page up</string>
+    <string name="page_move_down">Move this page down</string>
+    <string name="page_set_main">Make this the main page</string>
+    <string name="toast_main_set">Main page set</string>
+
     <string name="delete">Delete</string>
     <string name="dialog_delete_title">Delete this icon?</string>
     <string name="dialog_delete_msg">The saved image and settings will be removed and the shortcut will stop working. If its icon is still on your home screen, long-press it and remove it.</string>

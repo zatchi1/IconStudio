@@ -24,7 +24,8 @@ class EditorActivity : AppCompatActivity() {
         const val EXTRA_APP_LABEL = "app_label"
         const val EXTRA_ENTRY_ID = "entry_id"
         const val EXTRA_APPLY_MODE = "apply_mode"
-        const val EXTRA_SIZE = "size"   // 1..4 (cells); 0 = not placed, hide the size picker
+        const val EXTRA_W = "size_w"   // size in cells; 0 = not placed, hide the size picker
+        const val EXTRA_H = "size_h"
 
         private const val ICON_SIZE = 192
         private const val LAUNCHER_ICON_SIZE = 512
@@ -94,13 +95,19 @@ class EditorActivity : AppCompatActivity() {
             b.editorNote.visibility = View.GONE
             b.showName.visibility = View.VISIBLE
             b.showName.isChecked = entry?.showLabel ?: true
-            val size = intent.getIntExtra(EXTRA_SIZE, 0)
-            if (size in 1..4) {
+            val sw = intent.getIntExtra(EXTRA_W, 0)
+            val sh = intent.getIntExtra(EXTRA_H, 0)
+            if (sw in 1..HomeLayout.COLS && sh in 1..HomeLayout.ROWS) {
                 b.sizeLabel.visibility = View.VISIBLE
-                b.sizeGroup.visibility = View.VISIBLE
-                b.sizeGroup.check(
-                    when (size) { 2 -> R.id.size2; 3 -> R.id.size3; 4 -> R.id.size4; else -> R.id.size1 }
-                )
+                b.sizeRow.visibility = View.VISIBLE
+                b.sizeW.minValue = 1
+                b.sizeW.maxValue = HomeLayout.COLS
+                b.sizeW.value = sw
+                b.sizeW.wrapSelectorWheel = false
+                b.sizeH.minValue = 1
+                b.sizeH.maxValue = HomeLayout.ROWS
+                b.sizeH.value = sh
+                b.sizeH.wrapSelectorWheel = false
             }
         }
         b.btnOriginal.setOnClickListener { loadOriginalIcon() }
@@ -278,14 +285,12 @@ class EditorActivity : AppCompatActivity() {
                 refreshTexts()
                 if (applyMode) {
                     toast(R.string.toast_icon_applied)
-                    val chosen = when (b.sizeGroup.checkedRadioButtonId) {
-                        R.id.size2 -> 2
-                        R.id.size3 -> 3
-                        R.id.size4 -> 4
-                        R.id.size1 -> 1
-                        else -> 0
-                    }
-                    setResult(RESULT_OK, Intent().putExtra(EXTRA_SIZE, chosen))
+                    val shown = b.sizeRow.visibility == View.VISIBLE
+                    setResult(
+                        RESULT_OK,
+                        Intent().putExtra(EXTRA_W, if (shown) b.sizeW.value else 0)
+                            .putExtra(EXTRA_H, if (shown) b.sizeH.value else 0)
+                    )
                     finish()
                     return@runOnUiThread
                 }

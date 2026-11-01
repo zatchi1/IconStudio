@@ -135,49 +135,33 @@
                 android:textSize="14sp"
                 android:visibility="gone" />
 
-            <RadioGroup
-                android:id="@+id/sizeGroup"
+            <LinearLayout
+                android:id="@+id/sizeRow"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:gravity="center"
                 android:orientation="horizontal"
                 android:visibility="gone">
 
-                <RadioButton
-                    android:id="@+id/size1"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="1×1"
-                    android:textColor="@color/text_primary"
-                    android:textSize="13sp" />
+                <NumberPicker
+                    android:id="@+id/sizeW"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" />
 
-                <RadioButton
-                    android:id="@+id/size2"
-                    android:layout_width="0dp"
+                <TextView
+                    android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="2×2"
+                    android:paddingStart="20dp"
+                    android:paddingEnd="20dp"
+                    android:text="×"
                     android:textColor="@color/text_primary"
-                    android:textSize="13sp" />
+                    android:textSize="24sp" />
 
-                <RadioButton
-                    android:id="@+id/size3"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="3×3"
-                    android:textColor="@color/text_primary"
-                    android:textSize="13sp" />
-
-                <RadioButton
-                    android:id="@+id/size4"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="4×4"
-                    android:textColor="@color/text_primary"
-                    android:textSize="13sp" />
-            </RadioGroup>
+                <NumberPicker
+                    android:id="@+id/sizeH"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" />
+            </LinearLayout>
 
             <CheckBox
                 android:id="@+id/showName"
