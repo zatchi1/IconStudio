@@ -5,7 +5,7 @@ plugins {
 
 android {
     namespace = "com.iconstudio.app"
-    compileSdk = 34
+    compileSdk = 35
 
     signingConfigs {
         getByName("debug") {
@@ -19,11 +19,13 @@ android {
     defaultConfig {
         applicationId = "com.iconstudio.app"
         minSdk = 24
-        // Current Android; also fine on Android 9. (A target below 26 makes Android letterbox
-        // the app on tall screens, leaving a gap at the bottom.)
-        targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        // Targets current Android (15) and runs on Android 7+ (edge-to-edge handled in code).
+        targetSdk = 35
+        // Each CI build gets a higher versionCode, so a new APK always installs over the old
+        // one (same debug.keystore signature) and keeps the saved icons and layout.
+        val run = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 0
+        versionCode = 100 + run
+        versionName = "1.$run"
     }
 
     buildTypes {

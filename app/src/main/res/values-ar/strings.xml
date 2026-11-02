@@ -113,4 +113,11 @@
     <string name="toast_failed">تعذّر إنشاء الاختصار</string>
     <string name="toast_image_failed">تعذّر فتح هذه الصورة</string>
     <string name="toast_app_missing">هذا التطبيق لم يعد مثبتًا</string>
+    <string name="menu_backup">نسخة احتياطية واستعادة</string>
+    <string name="backup_export">حفظ ملف نسخة احتياطية (الأيقونات + الترتيب)</string>
+    <string name="backup_import">استعادة من ملف نسخة احتياطية</string>
+    <string name="backup_confirm">الاستعادة ستستبدل أيقوناتك وترتيب الشاشة الحاليين. متابعة؟</string>
+    <string name="toast_backup_done">تم حفظ النسخة الاحتياطية</string>
+    <string name="toast_restore_failed">هذا الملف ليس نسخة احتياطية صالحة</string>
+    <string name="page_clear_main">عدم تحديد أي صفحة رئيسية</string>
 </resources>

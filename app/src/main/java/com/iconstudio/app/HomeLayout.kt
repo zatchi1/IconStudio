@@ -35,6 +35,8 @@ class HomeLayout(ctx: Context) {
     val grid = mutableListOf<MutableList<Int>>()
     private var nextId = 1
     var mainPage = 0
+    /** True only once the user has picked the main page by hand (the house mark shows then). */
+    var mainSet = false
     var initialized = false
     val items = mutableListOf<Placed>()
     val dock = mutableListOf<String>()
@@ -53,7 +55,10 @@ class HomeLayout(ctx: Context) {
             grid.add(mutableListOf(0))
             nextId = maxOf(nextId, 1)
         }
-        if (mainPage !in allPages()) mainPage = allPages().first()
+        if (mainPage !in allPages()) {
+            mainPage = allPages().first()
+            mainSet = false
+        }
     }
 
     // ------------------------------------------------------------ storage
@@ -64,6 +69,7 @@ class HomeLayout(ctx: Context) {
             val o = JSONObject(file.readText())
             initialized = o.optBoolean("init", false)
             mainPage = o.optInt("main", 0)
+            mainSet = o.optBoolean("mainSet", false)
             val g = o.optJSONArray("grid")
             if (g != null) {
                 for (r in 0 until g.length()) {
@@ -118,6 +124,7 @@ class HomeLayout(ctx: Context) {
         val o = JSONObject()
         o.put("init", initialized)
         o.put("main", mainPage)
+        o.put("mainSet", mainSet)
         o.put("nextId", nextId)
         val g = JSONArray()
         grid.forEach { g.put(JSONArray(it)) }
@@ -198,7 +205,10 @@ class HomeLayout(ctx: Context) {
         grid[loc.first].remove(id)
         if (grid[loc.first].isEmpty()) grid.removeAt(loc.first)
         if (grid.isEmpty()) grid.add(mutableListOf(nextId++))
-        if (mainPage !in allPages()) mainPage = allPages().first()
+        if (mainPage !in allPages()) {
+            mainPage = allPages().first()
+            mainSet = false
+        }
     }
 
     fun pageIsEmpty(id: Int) = items.none { it.page == id }

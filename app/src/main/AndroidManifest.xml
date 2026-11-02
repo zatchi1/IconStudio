@@ -18,10 +18,15 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.IconStudio">
 
+        <!-- Use the full tall screen (no letterbox gap under the dock on 19.5:9 phones). -->
+        <meta-data android:name="android.max_aspect" android:value="3.0" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:windowSoftInputMode="adjustPan">
+            android:maxAspectRatio="3.0"
+            android:resizeableActivity="true"
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -33,11 +38,13 @@
             android:clearTaskOnLaunch="true"
             android:exported="true"
             android:launchMode="singleTask"
+            android:maxAspectRatio="3.0"
+            android:resizeableActivity="true"
             android:resumeWhilePausing="true"
             android:stateNotNeeded="true"
             android:taskAffinity=""
             android:theme="@style/Theme.IconStudio.Launcher"
-            android:windowSoftInputMode="adjustPan">
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.HOME" />
@@ -56,6 +63,8 @@
             android:name=".EditorActivity"
             android:exported="false"
             android:configChanges="orientation|screenSize|keyboardHidden"
+            android:maxAspectRatio="3.0"
+            android:resizeableActivity="true"
             android:windowSoftInputMode="adjustResize|stateHidden" />
 
     </application>

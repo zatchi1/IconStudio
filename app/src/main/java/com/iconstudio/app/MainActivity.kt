@@ -31,6 +31,7 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         b = ActivityMainBinding.inflate(layoutInflater)
         setContentView(b.root)
+        edgeToEdge(b.root)
 
         b.toolbar.inflateMenu(R.menu.main_menu)
         b.toolbar.setOnMenuItemClickListener { item ->

@@ -34,6 +34,7 @@ import android.widget.NumberPicker
 import android.widget.PopupMenu
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -48,7 +49,11 @@ import com.iconstudio.app.databinding.ActivityLauncherBinding
 import com.iconstudio.app.databinding.ItemAppBinding
 import com.iconstudio.app.databinding.ItemFolderBinding
 import com.iconstudio.app.databinding.ItemTileBinding
+import java.io.File
 import java.util.concurrent.Executors
+import java.util.zip.ZipEntry
+import java.util.zip.ZipInputStream
+import java.util.zip.ZipOutputStream
 
 /**
  * zatchi home screen: a 2D grid of pages (swipe left/right inside a row, up/down between rows),
@@ -86,6 +91,21 @@ class LauncherActivity : AppCompatActivity() {
 
     private val drawerAdapter = AppGridAdapter({ closeDrawer(); open(it) }, { showDrawerMenu(it) })
 
+    private class Snap(val item: Placed, val page: Int, val col: Int, val row: Int)
+
+    private val grids = HashSet<HomeGridView>()
+    private var snapshot: List<Snap> = emptyList()
+    private var dropped = false
+    private var previewActive = false
+    private var hoverKey = ""
+    private var hoverItem: Placed? = null
+    private var hoverPage = 0
+    private var hoverCol = 0
+    private var hoverRow = 0
+    private var hoverCentre = false
+    private var hoverTarget: View? = null
+    private val hoverRunnable = Runnable { applyHover() }
+
     private var dragging = false
     private var edgeDx = 0
     private var edgeDy = 0
@@ -105,6 +125,16 @@ class LauncherActivity : AppCompatActivity() {
                 val item = layout.items.firstOrNull { it.key == key }
                 if (item != null && w >= 1 && h >= 1 && (item.w != w || item.h != h)) resize(item, w, h)
             }
+        }
+
+    private val exportResult =
+        registerForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
+            if (uri != null) exportBackup(uri)
+        }
+
+    private val importResult =
+        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            if (uri != null) importBackup(uri)
         }
 
     private val bindResult =
@@ -128,6 +158,13 @@ class LauncherActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         b = ActivityLauncherBinding.inflate(layoutInflater)
         setContentView(b.root)
+        edgeToEdge(b.content, b.drawer)
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            // A home screen never closes. Back only closes the drawer.
+            override fun handleOnBackPressed() {
+                if (isDrawerOpen()) closeDrawer()
+            }
+        })
         layout = HomeLayout(this)
         widgetManager = AppWidgetManager.getInstance(this)
         widgetHost = AppWidgetHost(this, HOST_ID)
@@ -146,6 +183,8 @@ class LauncherActivity : AppCompatActivity() {
         b.grid.layoutManager = GridLayoutManager(this, HomeLayout.COLS)
         b.grid.adapter = drawerAdapter
 
+        b.dots.setOnLongClickListener { showPagesMenu(); true }
+        b.vdots.setOnLongClickListener { showPagesMenu(); true }
         b.btnSearch.setOnClickListener { openDrawer(true) }
         b.menuBtn.setOnClickListener { showTopMenu(it) }
 
@@ -196,12 +235,6 @@ class LauncherActivity : AppCompatActivity() {
         // Home button pressed while already on the home screen: go to the main page.
         closeDrawer()
         goToPage(layout.mainPage, true)
-    }
-
-    @Suppress("OVERRIDE_DEPRECATION", "DEPRECATION")
-    override fun onBackPressed() {
-        // A home screen never closes. Back only closes the drawer.
-        if (isDrawerOpen()) closeDrawer()
     }
 
     override fun onDestroy() {
@@ -422,7 +455,14 @@ class LauncherActivity : AppCompatActivity() {
             g.onDropItem = { item, page, col, r, centre -> onDrop(item, page, col, r, centre) }
             g.onEdge = { dx, dy -> onEdge(dx, dy) }
             g.onDragEnded = { onDragEnded() }
+            g.onHover = { item, page, col, r, centre -> onHover(item, page, col, r, centre) }
+            g.onEmptyLongPress = { showPagesMenu() }
+            grids.add(g)
             return VH(g)
+        }
+
+        override fun onViewRecycled(holder: VH) {
+            grids.remove(holder.grid)
         }
 
         override fun onBindViewHolder(holder: VH, position: Int) {
@@ -431,6 +471,7 @@ class LauncherActivity : AppCompatActivity() {
             holder.grid.removeAllViews()
             for (item in layout.items.filter { it.page == pageId }) {
                 val v = makeView(item) ?: continue
+                v.tag = item
                 holder.grid.addView(v, HomeGridView.LP(item.col, item.row, item.w, item.h))
             }
         }
@@ -455,9 +496,9 @@ class LauncherActivity : AppCompatActivity() {
         val cur = colInRow(row)
         val d = b.dots
         d.removeAllViews()
-        if (pages.size > 1 || pages.firstOrNull() != layout.mainPage) {
+        if (pages.size > 1) {
             for ((i, id) in pages.withIndex()) {
-                if (id == layout.mainPage) {
+                if (layout.mainSet && id == layout.mainPage) {
                     // The main page (chosen by the user) is marked with a little house.
                     val h = ImageView(this)
                     h.setImageResource(R.drawable.ic_home_dot)
@@ -594,9 +635,10 @@ class LauncherActivity : AppCompatActivity() {
     private fun beginDrag(v: View, item: Placed, shadowOf: View = v): Boolean {
         v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
         val s = popScale(item)
-        v.animate().scaleX(s).scaleY(s).setDuration(110).withEndAction {
+        v.animate().scaleX(s).scaleY(s).rotation(6f).setDuration(120).withEndAction {
             v.scaleX = 1f
             v.scaleY = 1f
+            v.rotation = 0f
             if (v.isAttachedToWindow) startDrag(v, item, shadowOf)
         }.start()
         return true
@@ -604,10 +646,64 @@ class LauncherActivity : AppCompatActivity() {
 
     private fun startDrag(v: View, item: Placed, shadowOf: View) {
         dragging = true
+        dropped = false
+        previewActive = false
+        hoverKey = ""
+        snapshot = layout.items.map { Snap(it, it.page, it.col, it.row) }
         val ok = v.startDragAndDrop(
             ClipData.newPlainText("item", item.key), PopShadow(shadowOf, popScale(item)), item, 0
         )
-        if (ok) v.alpha = 0.3f else dragging = false
+        // The item itself follows the finger: nothing is left behind in its old place.
+        if (ok) v.visibility = View.INVISIBLE else dragging = false
+    }
+
+    private fun restoreSnapshot(sync: Boolean) {
+        for (s in snapshot) {
+            s.item.page = s.page; s.item.col = s.col; s.item.row = s.row
+        }
+        previewActive = false
+        if (sync) grids.forEach { it.syncPositions() }
+    }
+
+    private fun clearHighlight() {
+        hoverTarget?.animate()?.scaleX(1f)?.scaleY(1f)?.setDuration(120)?.start()
+        hoverTarget = null
+    }
+
+    /** The finger moved over a cell: after a short pause the icons there slide aside. */
+    private fun onHover(item: Placed, page: Int, col: Int, row: Int, centre: Boolean) {
+        val key = "$page:$col:$row:$centre"
+        if (key == hoverKey) return
+        hoverKey = key
+        handler.removeCallbacks(hoverRunnable)
+        clearHighlight()
+        if (previewActive) restoreSnapshot(true)
+        hoverItem = item
+        hoverPage = page
+        hoverCol = col
+        hoverRow = row
+        hoverCentre = centre
+        handler.postDelayed(hoverRunnable, 170)
+    }
+
+    private fun applyHover() {
+        val item = hoverItem ?: return
+        if (!dragging) return
+        val other = layout.placedAt(hoverPage, hoverCol, hoverRow, item)
+        if (hoverCentre && other != null && other.w == 1 && other.h == 1 &&
+            item.w == 1 && item.h == 1 && isApp(item.key)
+        ) {
+            // About to make / fill a folder: just enlarge the target a little.
+            val v = grids.firstOrNull { it.pageIndex == hoverPage }?.viewOf(other)
+            v?.animate()?.scaleX(1.18f)?.scaleY(1.18f)?.setDuration(120)?.start()
+            hoverTarget = v
+            return
+        }
+        if (layout.fits(hoverPage, hoverCol, hoverRow, item.w, item.h, item)) return
+        if (layout.insertWithPush(item, hoverPage, hoverCol, hoverRow)) {
+            previewActive = true
+            grids.forEach { it.syncPositions() }
+        }
     }
 
     /**
@@ -644,6 +740,10 @@ class LauncherActivity : AppCompatActivity() {
     }
 
     private fun onDrop(item: Placed, page: Int, col: Int, row: Int, inCentre: Boolean) {
+        handler.removeCallbacks(hoverRunnable)
+        clearHighlight()
+        restoreSnapshot(false)
+        dropped = true
         if (item.page == page && item.col == col && item.row == row) {
             // Picked up and put back in the same place: show the item's menu.
             showItemMenu(item)
@@ -686,6 +786,10 @@ class LauncherActivity : AppCompatActivity() {
         edgeDx = 0
         edgeDy = 0
         handler.removeCallbacks(edgeRunnable)
+        handler.removeCallbacks(hoverRunnable)
+        clearHighlight()
+        if (!dropped) restoreSnapshot(false)   // dropped nowhere: everything goes back
+        previewActive = false
         refreshPages()
         updateDots()
     }
@@ -1006,7 +1110,8 @@ class LauncherActivity : AppCompatActivity() {
         pm.menu.add(0, 3, 2, R.string.menu_hidden_apps)
         pm.menu.add(0, 4, 3, R.string.menu_all_apps)
         pm.menu.add(0, 5, 4, R.string.menu_shortcuts_mode)
-        pm.menu.add(0, 6, 5, R.string.menu_home_settings)
+        pm.menu.add(0, 7, 5, R.string.menu_backup)
+        pm.menu.add(0, 6, 6, R.string.menu_home_settings)
         pm.setOnMenuItemClickListener {
             when (it.itemId) {
                 1 -> showWidgetPicker()
@@ -1015,6 +1120,7 @@ class LauncherActivity : AppCompatActivity() {
                 4 -> openDrawer(false)
                 5 -> startActivity(Intent(this, MainActivity::class.java))
                 6 -> startSafely(Intent(Settings.ACTION_HOME_SETTINGS))
+                7 -> showBackupMenu()
             }
             true
         }
@@ -1026,6 +1132,18 @@ class LauncherActivity : AppCompatActivity() {
         val id = curPageId()
         val (r, c) = layout.locate(id) ?: return
         val a = ArrayList<Pair<String, () -> Unit>>()
+        a.add(getString(R.string.page_set_main) to {
+            layout.mainPage = id
+            layout.mainSet = true
+            layout.save()
+            updateDots()
+            toast(R.string.toast_main_set)
+        })
+        if (layout.mainSet) a.add(getString(R.string.page_clear_main) to {
+            layout.mainSet = false
+            layout.save()
+            updateDots()
+        })
         a.add(getString(R.string.menu_page_left) to { addPageAndGo(layout.addPageInRow(r, c)) })
         a.add(getString(R.string.menu_page_right) to { addPageAndGo(layout.addPageInRow(r, c + 1)) })
         a.add(getString(R.string.menu_page_above) to { addPageAndGo(layout.addRow(r)) })
@@ -1034,12 +1152,6 @@ class LauncherActivity : AppCompatActivity() {
         a.add(getString(R.string.page_move_right) to { movePage(id) { layout.movePageHorizontal(id, 1) } })
         a.add(getString(R.string.page_move_up) to { movePage(id) { layout.movePageVertical(id, -1) } })
         a.add(getString(R.string.page_move_down) to { movePage(id) { layout.movePageVertical(id, 1) } })
-        a.add(getString(R.string.page_set_main) to {
-            layout.mainPage = id
-            layout.save()
-            updateDots()
-            toast(R.string.toast_main_set)
-        })
         a.add(getString(R.string.menu_delete_page) to { deletePage(id) })
         showActions(getString(R.string.menu_pages), a)
     }
@@ -1210,6 +1322,96 @@ class LauncherActivity : AppCompatActivity() {
     private fun hideKeyboard() {
         val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
         imm.hideSoftInputFromWindow(b.search.windowToken, 0)
+    }
+
+    // ================================================================ backup
+
+    private fun showBackupMenu() {
+        showActions(
+            getString(R.string.menu_backup),
+            listOf(
+                getString(R.string.backup_export) to { exportResult.launch("zatchi-backup.zip") },
+                getString(R.string.backup_import) to {
+                    MaterialAlertDialogBuilder(this)
+                        .setMessage(R.string.backup_confirm)
+                        .setPositiveButton(android.R.string.ok) { _, _ ->
+                            importResult.launch(arrayOf("application/zip", "application/octet-stream", "*/*"))
+                        }
+                        .setNegativeButton(android.R.string.cancel, null)
+                        .show()
+                }
+            )
+        )
+    }
+
+    private fun exportBackup(uri: Uri) {
+        layout.save()
+        io.execute {
+            val ok = try {
+                contentResolver.openOutputStream(uri)?.use { os ->
+                    ZipOutputStream(os.buffered()).use { z ->
+                        fun add(name: String, f: File) {
+                            if (!f.isFile) return
+                            z.putNextEntry(ZipEntry(name))
+                            f.inputStream().use { it.copyTo(z) }
+                            z.closeEntry()
+                        }
+                        add("entries.json", File(filesDir, "entries.json"))
+                        add("home_layout.json", File(filesDir, "home_layout.json"))
+                        File(filesDir, "icons").listFiles()?.forEach { add("icons/" + it.name, it) }
+                    }
+                } != null
+            } catch (e: Exception) {
+                false
+            }
+            runOnUiThread { toast(if (ok) R.string.toast_backup_done else R.string.toast_failed) }
+        }
+    }
+
+    private fun importBackup(uri: Uri) {
+        io.execute {
+            val tmp = File(cacheDir, "restore")
+            val ok = try {
+                tmp.deleteRecursively()
+                File(tmp, "icons").mkdirs()
+                contentResolver.openInputStream(uri)?.use { ins ->
+                    ZipInputStream(ins.buffered()).use { z ->
+                        var e = z.nextEntry
+                        while (e != null) {
+                            val n = e.name
+                            val dest = when {
+                                e.isDirectory -> null
+                                n == "entries.json" || n == "home_layout.json" -> File(tmp, n)
+                                n.startsWith("icons/") && n.length > 6 &&
+                                    !n.removePrefix("icons/").contains('/') && !n.contains("..") -> File(tmp, n)
+                                else -> null
+                            }
+                            dest?.outputStream()?.use { z.copyTo(it) }
+                            z.closeEntry()
+                            e = z.nextEntry
+                        }
+                    }
+                }
+                if (!File(tmp, "entries.json").isFile) {
+                    false
+                } else {
+                    val icons = File(filesDir, "icons")
+                    icons.deleteRecursively()
+                    icons.mkdirs()
+                    File(tmp, "icons").listFiles()?.forEach { it.copyTo(File(icons, it.name), true) }
+                    File(tmp, "entries.json").copyTo(File(filesDir, "entries.json"), true)
+                    val lay = File(tmp, "home_layout.json")
+                    if (lay.isFile) lay.copyTo(File(filesDir, "home_layout.json"), true)
+                    true
+                }
+            } catch (e: Exception) {
+                false
+            }
+            tmp.deleteRecursively()
+            runOnUiThread {
+                if (ok) recreate() else toast(R.string.toast_restore_failed)
+            }
+        }
     }
 
     // ================================================================ widgets

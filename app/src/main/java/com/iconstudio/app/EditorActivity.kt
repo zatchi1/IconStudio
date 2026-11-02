@@ -61,6 +61,7 @@ class EditorActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         b = ActivityEditorBinding.inflate(layoutInflater)
         setContentView(b.root)
+        edgeToEdge(b.root)
 
         applyMode = intent.getBooleanExtra(EXTRA_APPLY_MODE, false)
         var existing = intent.getStringExtra(EXTRA_ENTRY_ID)?.let { IconStore.get(this).get(it) }

@@ -115,4 +115,11 @@
     <string name="toast_failed">Couldn\'t create the shortcut</string>
     <string name="toast_image_failed">Couldn\'t open this image</string>
     <string name="toast_app_missing">This app is no longer installed</string>
+    <string name="menu_backup">Backup &amp; restore</string>
+    <string name="backup_export">Save a backup file (icons + layout)</string>
+    <string name="backup_import">Restore from a backup file</string>
+    <string name="backup_confirm">Restoring replaces your current icons and home layout. Continue?</string>
+    <string name="toast_backup_done">Backup saved</string>
+    <string name="toast_restore_failed">That file is not a valid backup</string>
+    <string name="page_clear_main">Don\'t mark any page as main</string>
 </resources>
