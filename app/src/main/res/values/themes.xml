@@ -15,6 +15,13 @@
         <item name="android:colorBackground">@color/bg</item>
         <item name="android:statusBarColor">@color/bg</item>
         <item name="android:navigationBarColor">@color/bg</item>
+        <item name="android:textAppearanceLargePopupMenu">@style/TextAppearance.Zat.PopupMenu</item>
+        <item name="textAppearanceLargePopupMenu">@style/TextAppearance.Zat.PopupMenu</item>
+        <item name="textAppearanceSmallPopupMenu">@style/TextAppearance.Zat.PopupMenu</item>
+    </style>
+
+    <style name="TextAppearance.Zat.PopupMenu" parent="TextAppearance.AppCompat.Widget.PopupMenu.Large">
+        <item name="android:textSize">13sp</item>
     </style>
 
     <!-- Home screen: shows the system wallpaper behind the app grid -->

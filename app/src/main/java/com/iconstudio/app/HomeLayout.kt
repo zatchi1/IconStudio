@@ -39,6 +39,8 @@ class HomeLayout(ctx: Context) {
     var mainSet = false
     var initialized = false
     val items = mutableListOf<Placed>()
+    /** Widgets of hidden apps: kept out of sight (and out of the way) until the app is shown again. */
+    val stash = mutableListOf<Placed>()
     val dock = mutableListOf<String>()
     val known = mutableSetOf<String>()
     val folders = LinkedHashMap<String, Folder>()
@@ -95,6 +97,17 @@ class HomeLayout(ctx: Context) {
                     )
                 }
             }
+            o.optJSONArray("stash")?.let { a ->
+                for (i in 0 until a.length()) {
+                    val x = a.getJSONObject(i)
+                    stash.add(
+                        Placed(
+                            x.getString("k"), x.getInt("p"), x.getInt("c"), x.getInt("r"),
+                            x.optInt("w", 1), x.optInt("h", 1)
+                        )
+                    )
+                }
+            }
             readStrings(o.optJSONArray("dock"), dock)
             readStrings(o.optJSONArray("known"), known)
             readStrings(o.optJSONArray("locked"), locked)
@@ -137,6 +150,14 @@ class HomeLayout(ctx: Context) {
             )
         }
         o.put("items", a)
+        val sa = JSONArray()
+        stash.forEach {
+            sa.put(
+                JSONObject().put("k", it.key).put("p", it.page).put("c", it.col)
+                    .put("r", it.row).put("w", it.w).put("h", it.h)
+            )
+        }
+        o.put("stash", sa)
         o.put("dock", JSONArray(dock))
         o.put("known", JSONArray(known.toList()))
         o.put("locked", JSONArray(locked.toList()))

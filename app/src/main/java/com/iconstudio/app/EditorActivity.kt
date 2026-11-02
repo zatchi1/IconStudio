@@ -26,6 +26,8 @@ class EditorActivity : AppCompatActivity() {
         const val EXTRA_APPLY_MODE = "apply_mode"
         const val EXTRA_W = "size_w"   // size in cells; 0 = not placed, hide the size picker
         const val EXTRA_H = "size_h"
+        const val EXTRA_CELL_W = "cell_w"   // size of one home cell in px, to shape the frame
+        const val EXTRA_CELL_H = "cell_h"
 
         private const val ICON_SIZE = 192
         private const val LAUNCHER_ICON_SIZE = 512
@@ -109,6 +111,16 @@ class EditorActivity : AppCompatActivity() {
                 b.sizeH.maxValue = HomeLayout.ROWS
                 b.sizeH.value = sh
                 b.sizeH.wrapSelectorWheel = false
+                val cw = intent.getIntExtra(EXTRA_CELL_W, 0)
+                val ch = intent.getIntExtra(EXTRA_CELL_H, 0)
+                // The frame always has the shape of the tile it will fill.
+                val update = {
+                    b.editor.aspect = tileAspect(b.sizeW.value, b.sizeH.value, cw, ch, b.showName.isChecked)
+                }
+                b.sizeW.setOnValueChangedListener { _, _, _ -> update() }
+                b.sizeH.setOnValueChangedListener { _, _, _ -> update() }
+                b.showName.setOnCheckedChangeListener { _, _ -> update() }
+                update()
             }
         }
         b.btnOriginal.setOnClickListener { loadOriginalIcon() }
@@ -121,6 +133,28 @@ class EditorActivity : AppCompatActivity() {
             syncControls()
         }
         b.btnSave.setOnClickListener { save() }
+
+        // Zoom slider (exponential scale) kept in step with pinch zoom.
+        val zMin = b.editor.minZoom()
+        val zMax = b.editor.maxZoom()
+        val zRange = Math.log((zMax / zMin).toDouble())
+        b.seekZoom.max = 100
+        var zoomFromCode = false
+        b.editor.onZoomChanged = { z ->
+            zoomFromCode = true
+            b.seekZoom.progress = (Math.log((z / zMin).toDouble()) / zRange * 100).toInt().coerceIn(0, 100)
+            zoomFromCode = false
+        }
+        b.seekZoom.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(sb: SeekBar, progress: Int, fromUser: Boolean) {
+                if (fromUser && !zoomFromCode) {
+                    b.editor.setZoomValue((zMin * Math.exp(zRange * progress / 100.0)).toFloat())
+                }
+            }
+
+            override fun onStartTrackingTouch(sb: SeekBar) {}
+            override fun onStopTrackingTouch(sb: SeekBar) {}
+        })
 
         b.seekRotation.max = 360
         b.seekRotation.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
@@ -146,6 +180,16 @@ class EditorActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         io.shutdown()
+    }
+
+    /** Width / height of the visible part of a w x h tile (cells are not square, a name takes a strip). */
+    private fun tileAspect(w: Int, h: Int, cw: Int, ch: Int, label: Boolean): Float {
+        if (w == 1 && h == 1) return 1f
+        if (cw <= 0 || ch <= 0) return w.toFloat() / h
+        val d = resources.displayMetrics.density
+        val tw = w * cw - 8 * d
+        val th = h * ch - 8 * d - (if (label) 22 * d else 0f)
+        return (tw / th.coerceAtLeast(1f)).coerceIn(0.2f, 5f)
     }
 
     // ---------------------------------------------------------------- loading images

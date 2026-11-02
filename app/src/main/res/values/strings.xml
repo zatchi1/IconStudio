@@ -122,4 +122,7 @@
     <string name="toast_backup_done">Backup saved</string>
     <string name="toast_restore_failed">That file is not a valid backup</string>
     <string name="page_clear_main">Don\'t mark any page as main</string>
+    <string name="label_zoom">Zoom in / out</string>
+    <string name="menu_resize_drag">Resize by dragging</string>
+    <string name="toast_no_resize">This widget can\'t be resized</string>
 </resources>

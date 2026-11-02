@@ -158,7 +158,7 @@ class LauncherActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         b = ActivityLauncherBinding.inflate(layoutInflater)
         setContentView(b.root)
-        edgeToEdge(b.content, b.drawer)
+        edgeToEdge(b.content, b.drawer, b.header)
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             // A home screen never closes. Back only closes the drawer.
             override fun handleOnBackPressed() {
@@ -183,6 +183,7 @@ class LauncherActivity : AppCompatActivity() {
         b.grid.layoutManager = GridLayoutManager(this, HomeLayout.COLS)
         b.grid.adapter = drawerAdapter
 
+        b.dock.setOnDragListener { _, e -> onDockDrag(e) }
         b.dots.setOnLongClickListener { showPagesMenu(); true }
         b.vdots.setOnLongClickListener { showPagesMenu(); true }
         b.btnSearch.setOnClickListener { openDrawer(true) }
@@ -296,6 +297,7 @@ class LauncherActivity : AppCompatActivity() {
             it.key.startsWith(FOLDER_PREFIX) && !layout.folders.containsKey(it.key.removePrefix(FOLDER_PREFIX))
         }
         cleanFolders()
+        stashHiddenWidgets()
         val first = !layout.initialized
         if (first) {
             layout.initialized = true
@@ -375,6 +377,7 @@ class LauncherActivity : AppCompatActivity() {
     }
 
     private fun refreshPages() {
+        resizeOverlay = null
         outerAdapter.notifyDataSetChanged()
     }
 
@@ -605,11 +608,13 @@ class LauncherActivity : AppCompatActivity() {
             bindIcon(vb, cell)
             vb.label.visibility = View.GONE
             vb.root.setOnClickListener { open(cell) }
-            vb.root.setOnLongClickListener { showDockMenu(cell); true }
+            vb.root.setOnLongClickListener {
+                beginDrag(it, Placed(cell.app.key, -1, 0, 0), vb.icon)
+            }
             // Equal share of the full width: spread out like the original home screen.
             dock.addView(vb.root, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         }
-        dock.visibility = if (cells.isEmpty()) View.GONE else View.VISIBLE
+        dock.visibility = View.VISIBLE
     }
 
     // ================================================================ drag and drop
@@ -649,7 +654,8 @@ class LauncherActivity : AppCompatActivity() {
         dropped = false
         previewActive = false
         hoverKey = ""
-        snapshot = layout.items.map { Snap(it, it.page, it.col, it.row) }
+        snapshot = layout.items.map { Snap(it, it.page, it.col, it.row) } +
+            Snap(item, item.page, item.col, item.row)
         val ok = v.startDragAndDrop(
             ClipData.newPlainText("item", item.key), PopShadow(shadowOf, popScale(item)), item, 0
         )
@@ -758,6 +764,7 @@ class LauncherActivity : AppCompatActivity() {
             if (isApp(other.key)) {
                 val f = layout.newFolder(getString(R.string.folder_default_name), listOf(other.key, item.key))
                 layout.items.remove(item)
+                layout.dock.remove(item.key)
                 layout.items.remove(other)
                 layout.items.add(Placed(FOLDER_PREFIX + f.id, other.page, other.col, other.row))
                 layout.save()
@@ -767,15 +774,23 @@ class LauncherActivity : AppCompatActivity() {
             if (folder != null) {
                 folder.keys.add(item.key)
                 layout.items.remove(item)
+                layout.dock.remove(item.key)
                 layout.save()
                 return
             }
         }
 
+        var placed = true
         if (layout.fits(page, col, row, item.w, item.h, item)) {
             item.page = page; item.col = col; item.row = row
         } else if (!layout.insertWithPush(item, page, col, row)) {
             toast(R.string.toast_no_room)
+            placed = false
+        }
+        if (placed && item !in layout.items) {
+            // Came from the dock: now it lives on the page.
+            layout.items.add(item)
+            layout.dock.remove(item.key)
         }
         layout.save()
     }
@@ -790,8 +805,62 @@ class LauncherActivity : AppCompatActivity() {
         clearHighlight()
         if (!dropped) restoreSnapshot(false)   // dropped nowhere: everything goes back
         previewActive = false
+        renderDock()
         refreshPages()
         updateDots()
+    }
+
+    /** Drag events over the dock: drop an app here to put it in the dock at that spot. */
+    private fun onDockDrag(e: android.view.DragEvent): Boolean {
+        val item = e.localState as? Placed
+        when (e.action) {
+            android.view.DragEvent.ACTION_DRAG_STARTED -> return item != null && isApp(item.key)
+            android.view.DragEvent.ACTION_DRAG_LOCATION -> {
+                onEdge(0, 0)
+                hoverKey = ""
+                handler.removeCallbacks(hoverRunnable)
+                clearHighlight()
+                if (previewActive) restoreSnapshot(true)
+            }
+            android.view.DragEvent.ACTION_DROP -> {
+                if (item != null) dropOnDock(item, e.x)
+            }
+            android.view.DragEvent.ACTION_DRAG_ENDED -> onDragEnded()
+        }
+        return true
+    }
+
+    private fun dropOnDock(item: Placed, x: Float) {
+        handler.removeCallbacks(hoverRunnable)
+        clearHighlight()
+        restoreSnapshot(false)
+        dropped = true
+        val key = item.key
+        val app = appByKey[key] ?: return
+        val inDock = key in layout.dock
+        val n = layout.dock.size
+        if (!inDock && n >= DOCK_MAX) {
+            toast(R.string.toast_dock_full)
+            return
+        }
+        val slots = if (inDock) n else n + 1
+        val idx = ((x / b.dock.width.coerceAtLeast(1)) * slots).toInt().coerceIn(0, slots - 1)
+        if (inDock) {
+            val old = layout.dock.indexOf(key)
+            if (old == idx) {
+                showDockMenu(cellFor(app))
+                return
+            }
+            layout.dock.removeAt(old)
+            layout.dock.add(idx.coerceAtMost(layout.dock.size), key)
+        } else {
+            layout.items.removeAll { it.key == key }
+            for (f in layout.folders.values) f.keys.remove(key)
+            cleanFolders()
+            layout.dock.add(idx.coerceAtMost(layout.dock.size), key)
+        }
+        layout.save()
+        render()
     }
 
     // ================================================================ PIN, lock, hide
@@ -870,6 +939,7 @@ class LauncherActivity : AppCompatActivity() {
         layout.dock.remove(app.key)
         for (f in layout.folders.values) f.keys.remove(app.key)
         cleanFolders()
+        stashHiddenWidgets()
         layout.save()
         render()
         toast(R.string.toast_hidden)
@@ -880,6 +950,7 @@ class LauncherActivity : AppCompatActivity() {
         if (!layout.isPlaced(app.key) && !layout.dock.contains(app.key)) {
             if (!placeIfRoom(app.key, curPageId())) layout.addAuto(app.key, curPageId(), curRow())
         }
+        restoreWidgetsOf(app.pkg)
         layout.save()
         render()
     }
@@ -1015,7 +1086,7 @@ class LauncherActivity : AppCompatActivity() {
 
     private fun showItemMenu(item: Placed) {
         if (item.key.startsWith(WIDGET_PREFIX)) {
-            showWidgetMenu(item)
+            startResize(item)
             return
         }
         if (item.key.startsWith(FOLDER_PREFIX)) {
@@ -1035,6 +1106,7 @@ class LauncherActivity : AppCompatActivity() {
         val actions = ArrayList<Pair<String, () -> Unit>>()
         actions.add(getString(R.string.menu_change_icon) to { openEditor(cell, item.w, item.h) })
         if (cell.custom) actions.add(getString(R.string.menu_reset_icon) to { resetIcon(app) })
+        actions.add(getString(R.string.menu_resize_drag) to { startResize(item) })
         actions.add(getString(R.string.menu_size) to { showSizeDialog(item) })
         actions.add(getString(R.string.menu_add_dock) to { moveToDock(app.key) })
         actions.add(getString(R.string.menu_remove_home) to { removeFromHome(app.key) })
@@ -1211,6 +1283,8 @@ class LauncherActivity : AppCompatActivity() {
                 .putExtra(EditorActivity.EXTRA_APPLY_MODE, true)
                 .putExtra(EditorActivity.EXTRA_W, w)
                 .putExtra(EditorActivity.EXTRA_H, h)
+                .putExtra(EditorActivity.EXTRA_CELL_W, cellPx().first)
+                .putExtra(EditorActivity.EXTRA_CELL_H, cellPx().second)
         )
     }
 
@@ -1324,6 +1398,91 @@ class LauncherActivity : AppCompatActivity() {
         imm.hideSoftInputFromWindow(b.search.windowToken, 0)
     }
 
+    // ================================================================ resize by dragging
+
+    private var resizeOverlay: ResizeOverlay? = null
+
+    private fun startResize(item: Placed) {
+        val g = grids.firstOrNull { it.pageIndex == item.page } ?: return
+        val ov = ResizeOverlay(this, item)
+        val isWidget = item.key.startsWith(WIDGET_PREFIX)
+        if (isWidget) {
+            val id = item.key.removePrefix(WIDGET_PREFIX).toIntOrNull()
+            val info = id?.let { widgetManager.getAppWidgetInfo(it) }
+            if (info != null) {
+                ov.allowH = info.resizeMode and AppWidgetProviderInfo.RESIZE_HORIZONTAL != 0
+                ov.allowV = info.resizeMode and AppWidgetProviderInfo.RESIZE_VERTICAL != 0
+                val (cw, ch) = cellPx()
+                if (info.minResizeWidth > 0) ov.minW = ((info.minResizeWidth + cw - 1) / cw).coerceIn(1, HomeLayout.COLS)
+                if (info.minResizeHeight > 0) ov.minH = ((info.minResizeHeight + ch - 1) / ch).coerceIn(1, HomeLayout.ROWS)
+            }
+            if (!ov.allowH && !ov.allowV) toast(R.string.toast_no_resize)
+            ov.onDelete = {
+                resizeOverlay = null
+                g.removeView(ov)
+                removeWidget(item)
+            }
+        }
+        ov.onTry = { c, r, w, h ->
+            if (layout.fits(item.page, c, r, w, h, item)) {
+                item.col = c; item.row = r; item.w = w; item.h = h
+                g.syncPositions(false)
+                true
+            } else false
+        }
+        ov.onCommit = {
+            layout.save()
+            val frame = g.viewOf(item) as? WidgetFrame
+            frame?.post {
+                val hv = frame.getChildAt(0) as? android.appwidget.AppWidgetHostView
+                val wDp = (frame.width / density).toInt()
+                val hDp = (frame.height / density).toInt()
+                if (hv != null && wDp > 0 && hDp > 0) hv.updateAppWidgetSize(Bundle(), wDp, hDp, wDp, hDp)
+            }
+        }
+        ov.onDone = {
+            layout.save()
+            resizeOverlay = null
+            refreshPages()
+        }
+        resizeOverlay = ov
+        g.addView(ov, HomeGridView.LP(0, 0, HomeLayout.COLS, HomeLayout.ROWS))
+    }
+
+    // ================================================================ widgets of hidden apps
+
+    private fun widgetPkg(key: String): String? =
+        key.removePrefix(WIDGET_PREFIX).toIntOrNull()
+            ?.let { widgetManager.getAppWidgetInfo(it)?.provider?.packageName }
+
+    private fun hiddenPkgs(): Set<String> = layout.hidden.map { it.substringBefore('/') }.toSet()
+
+    /** Widgets that belong to hidden apps disappear from the pages (and are kept aside). */
+    private fun stashHiddenWidgets() {
+        val pk = hiddenPkgs()
+        if (pk.isEmpty()) return
+        val ws = layout.items.filter { it.key.startsWith(WIDGET_PREFIX) && widgetPkg(it.key) in pk }
+        layout.items.removeAll(ws.toSet())
+        layout.stash.addAll(ws)
+    }
+
+    private fun restoreWidgetsOf(pkg: String) {
+        val back = layout.stash.filter { widgetPkg(it.key) == pkg }
+        for (w in back) {
+            layout.stash.remove(w)
+            var ok = w.page in layout.allPages() && layout.fits(w.page, w.col, w.row, w.w, w.h, null)
+            if (!ok) {
+                for (p in layout.allPages()) {
+                    val f = layout.findFree(p, w.w, w.h) ?: continue
+                    w.page = p; w.col = f.first; w.row = f.second
+                    ok = true
+                    break
+                }
+            }
+            if (ok) layout.items.add(w) else layout.stash.add(w)
+        }
+    }
+
     // ================================================================ backup
 
     private fun showBackupMenu() {
@@ -1433,7 +1592,8 @@ class LauncherActivity : AppCompatActivity() {
         io.execute {
             val pm = packageManager
             val options = try {
-                widgetManager.installedProviders.map { info ->
+                val hiddenPk = hiddenPkgs()
+                widgetManager.installedProviders.filter { it.provider.packageName !in hiddenPk }.map { info ->
                     val appLabel = try {
                         pm.getApplicationLabel(pm.getApplicationInfo(info.provider.packageName, 0)).toString()
                     } catch (e: Exception) {

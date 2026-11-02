@@ -65,6 +65,19 @@ class EditorView @JvmOverloads constructor(
             invalidate()
         }
 
+    /** Frame shape: width / height. 1 = square icon; other values match a bigger tile. */
+    var aspect = 1f
+        set(value) {
+            val v = value.coerceIn(0.2f, 5f)
+            if (v == field) return
+            field = v
+            requestLayout()
+            invalidate()
+        }
+
+    /** Called whenever the zoom changes (pinch or code). */
+    var onZoomChanged: ((Float) -> Unit)? = null
+
     private val bmpPaint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
     private val drawMatrix = Matrix()
     private val checkerPaint = Paint()
@@ -86,16 +99,18 @@ class EditorView @JvmOverloads constructor(
         object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
             override fun onScale(detector: ScaleGestureDetector): Boolean {
                 val w = width.toFloat()
-                if (w <= 0f) return true
+                val h = height.toFloat()
+                if (w <= 0f || h <= 0f) return true
                 val newZoom = (zoom * detector.scaleFactor).coerceIn(MIN_ZOOM, MAX_ZOOM)
                 val f = newZoom / zoom
                 val cx = w / 2f + txN * w
-                val cy = w / 2f + tyN * w
+                val cy = h / 2f + tyN * h
                 val nx = detector.focusX + (cx - detector.focusX) * f
                 val ny = detector.focusY + (cy - detector.focusY) * f
                 txN = (nx - w / 2f) / w
-                tyN = (ny - w / 2f) / w
+                tyN = (ny - h / 2f) / h
                 zoom = newZoom
+                onZoomChanged?.invoke(zoom)
                 invalidate()
                 return true
             }
@@ -115,10 +130,25 @@ class EditorView @JvmOverloads constructor(
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        val maxSize = (340 * resources.displayMetrics.density).toInt()
-        val s = min(MeasureSpec.getSize(widthMeasureSpec), maxSize)
-        setMeasuredDimension(s, s)
+        val maxSize = min(MeasureSpec.getSize(widthMeasureSpec), (340 * resources.displayMetrics.density).toInt())
+        val maxH = (380 * resources.displayMetrics.density).toInt()
+        var w = maxSize
+        var h = (w / aspect).toInt()
+        if (h > maxH) {
+            h = maxH
+            w = (h * aspect).toInt()
+        }
+        setMeasuredDimension(w.coerceAtLeast(1), h.coerceAtLeast(1))
     }
+
+    /** Sets the zoom from outside (slider), keeping the image centre where it is. */
+    fun setZoomValue(z: Float) {
+        zoom = z.coerceIn(MIN_ZOOM, MAX_ZOOM)
+        invalidate()
+    }
+
+    fun minZoom() = MIN_ZOOM
+    fun maxZoom() = MAX_ZOOM
 
     fun hasSource(): Boolean = src != null
 
@@ -134,6 +164,7 @@ class EditorView @JvmOverloads constructor(
         txN = 0f
         tyN = 0f
         angle = 0f
+        onZoomChanged?.invoke(zoom)
         invalidate()
     }
 
@@ -145,6 +176,7 @@ class EditorView @JvmOverloads constructor(
         tyN = s.ty
         angle = s.angle
         bgMode = s.bg
+        onZoomChanged?.invoke(zoom)
         invalidate()
     }
 
@@ -155,33 +187,34 @@ class EditorView @JvmOverloads constructor(
         else -> Color.TRANSPARENT
     }
 
-    private fun buildMatrix(out: Matrix, size: Float) {
+    private fun buildMatrix(out: Matrix, w: Float, h: Float) {
         val b = src ?: return
-        val base = size / min(b.width, b.height).toFloat()
+        val base = maxOf(w / b.width, h / b.height)
         val s = base * zoom
         out.reset()
         out.postTranslate(-b.width / 2f, -b.height / 2f)
         out.postRotate(angle)
         out.postScale(s, s)
-        out.postTranslate(size / 2f + txN * size, size / 2f + tyN * size)
+        out.postTranslate(w / 2f + txN * w, h / 2f + tyN * h)
     }
 
     override fun onDraw(canvas: Canvas) {
-        val s = width.toFloat()
+        val w = width.toFloat()
+        val h = height.toFloat()
         if (bgMode == BG_TRANSPARENT) {
-            canvas.drawRect(0f, 0f, s, s, checkerPaint)
+            canvas.drawRect(0f, 0f, w, h, checkerPaint)
         } else {
             canvas.drawColor(bgColor())
         }
         src?.let {
-            buildMatrix(drawMatrix, s)
+            buildMatrix(drawMatrix, w, h)
             canvas.drawBitmap(it, drawMatrix, bmpPaint)
         }
-        canvas.drawLine(s / 3f, 0f, s / 3f, s, gridPaint)
-        canvas.drawLine(2f * s / 3f, 0f, 2f * s / 3f, s, gridPaint)
-        canvas.drawLine(0f, s / 3f, s, s / 3f, gridPaint)
-        canvas.drawLine(0f, 2f * s / 3f, s, 2f * s / 3f, gridPaint)
-        canvas.drawRect(0f, 0f, s, s, borderPaint)
+        canvas.drawLine(w / 3f, 0f, w / 3f, h, gridPaint)
+        canvas.drawLine(2f * w / 3f, 0f, 2f * w / 3f, h, gridPaint)
+        canvas.drawLine(0f, h / 3f, w, h / 3f, gridPaint)
+        canvas.drawLine(0f, 2f * h / 3f, w, 2f * h / 3f, gridPaint)
+        canvas.drawRect(0f, 0f, w, h, borderPaint)
     }
 
     override fun onTouchEvent(e: MotionEvent): Boolean {
@@ -212,9 +245,10 @@ class EditorView @JvmOverloads constructor(
             }
             MotionEvent.ACTION_MOVE -> {
                 val w = width.toFloat()
-                if (w > 0f) {
+                val h = height.toFloat()
+                if (w > 0f && h > 0f) {
                     txN += (fx - lastX) / w
-                    tyN += (fy - lastY) / w
+                    tyN += (fy - lastY) / h
                 }
                 lastX = fx
                 lastY = fy
@@ -226,14 +260,16 @@ class EditorView @JvmOverloads constructor(
         return true
     }
 
-    /** Renders exactly what is inside the frame to a square bitmap (transparent if chosen). */
+    /** Renders exactly what is inside the frame (long side = [outSize]); transparent if chosen. */
     fun renderOutput(outSize: Int): Bitmap? {
         val b = src ?: return null
-        val out = Bitmap.createBitmap(outSize, outSize, Bitmap.Config.ARGB_8888)
+        val ow = if (aspect >= 1f) outSize else (outSize * aspect).toInt().coerceAtLeast(1)
+        val oh = if (aspect >= 1f) (outSize / aspect).toInt().coerceAtLeast(1) else outSize
+        val out = Bitmap.createBitmap(ow, oh, Bitmap.Config.ARGB_8888)
         val c = Canvas(out)
         if (bgMode != BG_TRANSPARENT) c.drawColor(bgColor())
         val m = Matrix()
-        buildMatrix(m, outSize.toFloat())
+        buildMatrix(m, ow.toFloat(), oh.toFloat())
         c.drawBitmap(b, m, bmpPaint)
         return out
     }

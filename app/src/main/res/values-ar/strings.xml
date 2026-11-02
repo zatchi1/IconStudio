@@ -120,4 +120,7 @@
     <string name="toast_backup_done">تم حفظ النسخة الاحتياطية</string>
     <string name="toast_restore_failed">هذا الملف ليس نسخة احتياطية صالحة</string>
     <string name="page_clear_main">عدم تحديد أي صفحة رئيسية</string>
+    <string name="label_zoom">تكبير / تصغير</string>
+    <string name="menu_resize_drag">تغيير الحجم بالسحب</string>
+    <string name="toast_no_resize">هذا الويدجت لا يقبل تغيير الحجم</string>
 </resources>

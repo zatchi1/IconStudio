@@ -61,6 +61,22 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="16dp"
+                android:text="@string/label_zoom"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp" />
+
+            <SeekBar
+                android:id="@+id/seekZoom"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:max="100"
+                android:progress="50" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
                 android:text="@string/label_rotation"
                 android:textColor="@color/text_primary"
                 android:textSize="14sp" />

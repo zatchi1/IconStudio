@@ -1,6 +1,12 @@
 package com.iconstudio.app
 
 import android.content.Context
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.PointF
+import android.graphics.RectF
+import android.view.MotionEvent
 import android.view.DragEvent
 import android.view.View
 import android.view.ViewGroup
@@ -42,7 +48,7 @@ class HomeGridView(ctx: Context) : ViewGroup(ctx) {
      * Moves the children to the cells their [Placed] now say, sliding them there
      * (so the other icons visibly make room while something is dragged).
      */
-    fun syncPositions() {
+    fun syncPositions(animate: Boolean = true) {
         val oldX = HashMap<View, Float>()
         val oldY = HashMap<View, Float>()
         for (i in 0 until childCount) {
@@ -63,7 +69,7 @@ class HomeGridView(ctx: Context) : ViewGroup(ctx) {
                     val c = getChildAt(i)
                     val dx = (oldX[c] ?: c.left.toFloat()) - c.left
                     val dy = (oldY[c] ?: c.top.toFloat()) - c.top
-                    if (dx != 0f || dy != 0f) {
+                    if (animate && (dx != 0f || dy != 0f)) {
                         c.translationX = dx
                         c.translationY = dy
                         c.animate().translationX(0f).translationY(0f).setDuration(190).start()
@@ -165,5 +171,149 @@ class HomeGridView(ctx: Context) : ViewGroup(ctx) {
             )
         }
         return Triple(col, row, centre)
+    }
+}
+
+/**
+ * Drawn over a page while an item is being resized: a frame around the item with a handle on each
+ * side that may be dragged (cell by cell). A tap outside the frame ends the mode.
+ */
+class ResizeOverlay(ctx: Context, private val item: Placed) : View(ctx) {
+
+    var allowH = true
+    var allowV = true
+    var minW = 1
+    var minH = 1
+    /** Asks whether the item may take this cell range; returns true when it was applied. */
+    var onTry: ((col: Int, row: Int, w: Int, h: Int) -> Boolean)? = null
+    var onDone: (() -> Unit)? = null
+    var onCommit: (() -> Unit)? = null
+    var onDelete: (() -> Unit)? = null
+
+    private val d = resources.displayMetrics.density
+    private val line = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        style = Paint.Style.STROKE
+        strokeWidth = 2f * d
+    }
+    private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
+    private val dim = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF222222.toInt() }
+    private val xPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        strokeWidth = 2.2f * d
+        strokeCap = Paint.Cap.ROUND
+    }
+
+    private var active = -1   // 0 left, 1 top, 2 right, 3 bottom
+
+    private fun gx() = paddingLeft.toFloat()
+    private fun gy() = paddingTop.toFloat()
+    private fun cw() = (width - paddingLeft - paddingRight) / HomeLayout.COLS.toFloat()
+    private fun ch() = (height - paddingTop - paddingBottom) / HomeLayout.ROWS.toFloat()
+
+    private fun rect(): RectF {
+        val l = gx() + item.col * cw()
+        val t = gy() + item.row * ch()
+        return RectF(l + 3 * d, t + 3 * d, l + item.w * cw() - 3 * d, t + item.h * ch() - 3 * d)
+    }
+
+    private fun handles(r: RectF): List<Pair<Int, PointF>> {
+        val out = ArrayList<Pair<Int, PointF>>()
+        if (allowH) {
+            out.add(0 to PointF(r.left, r.centerY()))
+            out.add(2 to PointF(r.right, r.centerY()))
+        }
+        if (allowV) {
+            out.add(1 to PointF(r.centerX(), r.top))
+            out.add(3 to PointF(r.centerX(), r.bottom))
+        }
+        return out
+    }
+
+    private fun deleteCentre(r: RectF) = PointF(r.centerX(), r.top + 22 * d)
+
+    override fun onDraw(c: Canvas) {
+        val r = rect()
+        c.drawRoundRect(r, 14 * d, 14 * d, line)
+        for ((_, p) in handles(r)) {
+            c.drawCircle(p.x, p.y, 8 * d, fill)
+        }
+        if (onDelete != null) {
+            val p = deleteCentre(r)
+            c.drawCircle(p.x, p.y, 14 * d, dim)
+            c.drawCircle(p.x, p.y, 14 * d, line)
+            val k = 5 * d
+            c.drawLine(p.x - k, p.y - k, p.x + k, p.y + k, xPaint)
+            c.drawLine(p.x - k, p.y + k, p.x + k, p.y - k, xPaint)
+        }
+    }
+
+    private var downX = 0f
+    private var downY = 0f
+    private var moved = false
+
+    override fun onTouchEvent(e: MotionEvent): Boolean {
+        val r = rect()
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                downX = e.x; downY = e.y; moved = false
+                active = -1
+                val hit = 30 * d
+                for ((id, p) in handles(r)) {
+                    if (Math.hypot((e.x - p.x).toDouble(), (e.y - p.y).toDouble()) <= hit) {
+                        active = id
+                        parent?.requestDisallowInterceptTouchEvent(true)
+                        break
+                    }
+                }
+            }
+            MotionEvent.ACTION_MOVE -> if (active >= 0) {
+                moved = true
+                val cw = cw()
+                val ch = ch()
+                var col = item.col
+                var row = item.row
+                var w = item.w
+                var h = item.h
+                val mw = minOf(minW, w)
+                val mh = minOf(minH, h)
+                when (active) {
+                    0 -> {
+                        val nl = Math.round((e.x - gx()) / cw).coerceIn(0, col + w - mw)
+                        w = col + w - nl; col = nl
+                    }
+                    2 -> {
+                        val nr = Math.round((e.x - gx()) / cw).coerceIn(col + mw, HomeLayout.COLS)
+                        w = nr - col
+                    }
+                    1 -> {
+                        val nt = Math.round((e.y - gy()) / ch).coerceIn(0, row + h - mh)
+                        h = row + h - nt; row = nt
+                    }
+                    3 -> {
+                        val nb = Math.round((e.y - gy()) / ch).coerceIn(row + mh, HomeLayout.ROWS)
+                        h = nb - row
+                    }
+                }
+                if ((col != item.col || row != item.row || w != item.w || h != item.h) &&
+                    onTry?.invoke(col, row, w, h) == true
+                ) invalidate()
+            }
+            MotionEvent.ACTION_UP -> {
+                parent?.requestDisallowInterceptTouchEvent(false)
+                if (!moved && active < 0) {
+                    val dp = deleteCentre(r)
+                    if (onDelete != null &&
+                        Math.hypot((e.x - dp.x).toDouble(), (e.y - dp.y).toDouble()) <= 24 * d
+                    ) onDelete?.invoke()
+                    else if (!r.contains(e.x, e.y)) onDone?.invoke()
+                } else if (moved) {
+                    onCommit?.invoke()
+                }
+                active = -1
+            }
+            MotionEvent.ACTION_CANCEL -> active = -1
+        }
+        return true
     }
 }
