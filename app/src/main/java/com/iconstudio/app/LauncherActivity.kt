@@ -22,6 +22,7 @@ import android.os.Looper
 import android.provider.MediaStore
 import android.provider.Settings
 import android.text.InputType
+import android.util.TypedValue
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.View
@@ -554,6 +555,7 @@ class LauncherActivity : AppCompatActivity() {
             tb.label.visibility = if (cell.showLabel) View.VISIBLE else View.GONE
             tb.tile.setOnClickListener { open(cell) }
             tb.tile.setOnLongClickListener { beginDrag(tb.root, item, tb.tile) }
+            fitTile(tb.root, tb.tile, tb.label, item.w, item.h)
             tb.root
         }
     }
@@ -585,6 +587,35 @@ class LauncherActivity : AppCompatActivity() {
                 lp.width = s
                 lp.height = s
                 icon.layoutParams = lp
+            }
+        }
+    }
+
+    /**
+     * Gives a big tile exactly the w:h shape of its size (2x2 is a square, 4x3 a 4:3 rectangle),
+     * as large as fits inside the cells it covers, centred. The editor frame has the same
+     * shape, so what is cropped there is what is shown here.
+     */
+    private fun fitTile(root: android.widget.LinearLayout, tile: View, label: View, w: Int, h: Int) {
+        root.gravity = Gravity.CENTER
+        root.addOnLayoutChangeListener { _, l, t, r, bt, _, _, _, _ ->
+            val aw = (r - l) - dp(8)
+            val labelH = if (label.visibility == View.VISIBLE) dp(20) else 0
+            val ah = (bt - t) - dp(8) - labelH
+            if (aw <= 0 || ah <= 0) return@addOnLayoutChangeListener
+            val ratio = w.toFloat() / h
+            var tw = aw
+            var th = (tw / ratio).toInt()
+            if (th > ah) {
+                th = ah
+                tw = (th * ratio).toInt()
+            }
+            val lp = tile.layoutParams as android.widget.LinearLayout.LayoutParams
+            if (lp.width != tw || lp.height != th || lp.weight != 0f) {
+                lp.width = tw
+                lp.height = th
+                lp.weight = 0f
+                tile.layoutParams = lp
             }
         }
     }
@@ -796,6 +827,7 @@ class LauncherActivity : AppCompatActivity() {
     }
 
     private fun onDragEnded() {
+        hideMarker()
         if (!dragging) return
         dragging = false
         edgeDx = 0
@@ -810,6 +842,54 @@ class LauncherActivity : AppCompatActivity() {
         updateDots()
     }
 
+    private var dropMarker: View? = null
+
+    private fun marker(): View {
+        dropMarker?.let { return it }
+        val m = View(this)
+        m.setBackgroundResource(R.drawable.bg_drop_marker)
+        m.visibility = View.GONE
+        b.root.addView(m, android.widget.FrameLayout.LayoutParams(dp(4), dp(56), Gravity.TOP or Gravity.START))
+        dropMarker = m
+        return m
+    }
+
+    private fun hideMarker() {
+        dropMarker?.visibility = View.GONE
+    }
+
+    /** Where in the dock a dragged app would go: the slot index, for the dock's current icons. */
+    private fun dockSlot(inDock: Boolean, n: Int, x: Float): Int {
+        if (n == 0) return 0
+        val sw = b.dock.width.coerceAtLeast(1).toFloat() / n
+        return if (inDock) (x / sw).toInt().coerceIn(0, n - 1) else Math.round(x / sw).coerceIn(0, n)
+    }
+
+    private fun showDockMarker(inDock: Boolean, n: Int, idx: Int) {
+        val w = b.dock.width.coerceAtLeast(1).toFloat()
+        val bx = when {
+            n == 0 -> w / 2
+            inDock -> {
+                val old = idx
+                val sw = w / n
+                (if (old <= dockDragFrom) old * sw else (old + 1) * sw)
+            }
+            else -> idx * (w / n)
+        }
+        val m = marker()
+        val d = IntArray(2)
+        val r = IntArray(2)
+        b.dock.getLocationInWindow(d)
+        b.root.getLocationInWindow(r)
+        val x = (d[0] - r[0] + bx - dp(2)).coerceIn(dp(2).toFloat(), (b.root.width - dp(6)).toFloat())
+        m.translationX = x
+        m.translationY = (d[1] - r[1] + (b.dock.height - dp(56)) / 2f)
+        m.visibility = View.VISIBLE
+        m.bringToFront()
+    }
+
+    private var dockDragFrom = 0
+
     /** Drag events over the dock: drop an app here to put it in the dock at that spot. */
     private fun onDockDrag(e: android.view.DragEvent): Boolean {
         val item = e.localState as? Placed
@@ -821,11 +901,26 @@ class LauncherActivity : AppCompatActivity() {
                 handler.removeCallbacks(hoverRunnable)
                 clearHighlight()
                 if (previewActive) restoreSnapshot(true)
+                if (item != null) {
+                    val inDock = item.key in layout.dock
+                    val n = layout.dock.size
+                    if (!inDock && n >= DOCK_MAX) {
+                        hideMarker()
+                    } else {
+                        dockDragFrom = layout.dock.indexOf(item.key)
+                        showDockMarker(inDock, n, dockSlot(inDock, n, e.x))
+                    }
+                }
             }
+            android.view.DragEvent.ACTION_DRAG_EXITED -> hideMarker()
             android.view.DragEvent.ACTION_DROP -> {
+                hideMarker()
                 if (item != null) dropOnDock(item, e.x)
             }
-            android.view.DragEvent.ACTION_DRAG_ENDED -> onDragEnded()
+            android.view.DragEvent.ACTION_DRAG_ENDED -> {
+                hideMarker()
+                onDragEnded()
+            }
         }
         return true
     }
@@ -843,8 +938,7 @@ class LauncherActivity : AppCompatActivity() {
             toast(R.string.toast_dock_full)
             return
         }
-        val slots = if (inDock) n else n + 1
-        val idx = ((x / b.dock.width.coerceAtLeast(1)) * slots).toInt().coerceIn(0, slots - 1)
+        val idx = dockSlot(inDock, n, x)
         if (inDock) {
             val old = layout.dock.indexOf(key)
             if (old == idx) {
@@ -862,8 +956,6 @@ class LauncherActivity : AppCompatActivity() {
         layout.save()
         render()
     }
-
-    // ================================================================ PIN, lock, hide
 
     private fun pinField(hintRes: Int) = EditText(this).apply {
         inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
@@ -1175,28 +1267,66 @@ class LauncherActivity : AppCompatActivity() {
             .show()
     }
 
+    private var topMenu: android.widget.PopupWindow? = null
+
+    /** The three-dots menu: a dark rounded card with an icon per entry. */
     private fun showTopMenu(anchor: View) {
-        val pm = PopupMenu(this, anchor)
-        pm.menu.add(0, 1, 0, R.string.menu_add_widget)
-        pm.menu.add(0, 2, 1, R.string.menu_pages)
-        pm.menu.add(0, 3, 2, R.string.menu_hidden_apps)
-        pm.menu.add(0, 4, 3, R.string.menu_all_apps)
-        pm.menu.add(0, 5, 4, R.string.menu_shortcuts_mode)
-        pm.menu.add(0, 7, 5, R.string.menu_backup)
-        pm.menu.add(0, 6, 6, R.string.menu_home_settings)
-        pm.setOnMenuItemClickListener {
-            when (it.itemId) {
-                1 -> showWidgetPicker()
-                2 -> showPagesMenu()
-                3 -> showHiddenApps()
-                4 -> openDrawer(false)
-                5 -> startActivity(Intent(this, MainActivity::class.java))
-                6 -> startSafely(Intent(Settings.ACTION_HOME_SETTINGS))
-                7 -> showBackupMenu()
+        topMenu?.dismiss()
+        val card = LinearLayout(this)
+        card.orientation = LinearLayout.VERTICAL
+        card.setBackgroundResource(R.drawable.bg_menu)
+        card.setPadding(0, dp(8), 0, dp(8))
+        val pw = android.widget.PopupWindow(card, dp(230), ViewGroup.LayoutParams.WRAP_CONTENT, true)
+        pw.elevation = dp(12).toFloat()
+        pw.isOutsideTouchable = true
+        pw.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+        pw.animationStyle = android.R.style.Animation_Dialog
+
+        fun entry(icon: Int, text: Int, divider: Boolean = false, run: () -> Unit) {
+            if (divider) {
+                val line = View(this)
+                line.setBackgroundColor(0x22FFFFFF)
+                card.addView(line, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1))
+                    .apply { setMargins(dp(14), dp(6), dp(14), dp(6)) })
             }
-            true
+            val row = LinearLayout(this)
+            row.orientation = LinearLayout.HORIZONTAL
+            row.gravity = Gravity.CENTER_VERTICAL
+            row.setPadding(dp(16), 0, dp(16), 0)
+            val tv = TypedValue()
+            theme.resolveAttribute(android.R.attr.selectableItemBackground, tv, true)
+            row.setBackgroundResource(tv.resourceId)
+            val iv = ImageView(this)
+            iv.setImageResource(icon)
+            iv.alpha = 0.9f
+            row.addView(iv, LinearLayout.LayoutParams(dp(20), dp(20)))
+            val t = TextView(this)
+            t.setText(text)
+            t.setTextColor(0xFFF2F2F2.toInt())
+            t.textSize = 13f
+            t.maxLines = 1
+            t.ellipsize = android.text.TextUtils.TruncateAt.END
+            row.addView(t, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                .apply { marginStart = dp(14) })
+            row.setOnClickListener {
+                pw.dismiss()
+                run()
+            }
+            card.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(44)))
         }
-        pm.show()
+        entry(R.drawable.ic_m_widget, R.string.menu_add_widget) { showWidgetPicker() }
+        entry(R.drawable.ic_m_pages, R.string.menu_pages) { showPagesMenu() }
+        entry(R.drawable.ic_m_hidden, R.string.menu_hidden_apps) { showHiddenApps() }
+        entry(R.drawable.ic_apps, R.string.menu_all_apps) { openDrawer(false) }
+        entry(R.drawable.ic_m_edit, R.string.menu_shortcuts_mode, true) {
+            startActivity(Intent(this, MainActivity::class.java))
+        }
+        entry(R.drawable.ic_m_backup, R.string.menu_backup) { showBackupMenu() }
+        entry(R.drawable.ic_m_tune, R.string.menu_home_settings) {
+            startSafely(Intent(Settings.ACTION_HOME_SETTINGS))
+        }
+        topMenu = pw
+        pw.showAsDropDown(anchor, 0, dp(2), Gravity.END)
     }
 
     /** Add pages on any side, move the current page, choose the main page, delete an empty page. */
@@ -1444,6 +1574,14 @@ class LauncherActivity : AppCompatActivity() {
             layout.save()
             resizeOverlay = null
             refreshPages()
+        }
+        // Press and hold inside the frame: leave resize mode and pick the item up to move it.
+        ov.onBodyLongPress = {
+            val v = g.viewOf(item)
+            layout.save()
+            resizeOverlay = null
+            g.removeView(ov)
+            if (v != null) beginDrag(v, item, v)
         }
         resizeOverlay = ov
         g.addView(ov, HomeGridView.LP(0, 0, HomeLayout.COLS, HomeLayout.ROWS))

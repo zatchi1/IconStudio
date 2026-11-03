@@ -38,7 +38,7 @@ class EditorView @JvmOverloads constructor(
         const val BG_WHITE = 2
         const val BG_GRAY = 3
 
-        private const val MIN_ZOOM = 0.25f
+        private const val MIN_ZOOM = 0.1f
         private const val MAX_ZOOM = 8f
     }
 
@@ -74,6 +74,15 @@ class EditorView @JvmOverloads constructor(
             requestLayout()
             invalidate()
         }
+
+    /** Corner radius of the preview as a fraction of the short side (matches the home screen clip). */
+    var cornerFrac = 0.24f
+        set(value) {
+            field = value
+            invalidate()
+        }
+
+    private val clipPath = android.graphics.Path()
 
     /** Called whenever the zoom changes (pinch or code). */
     var onZoomChanged: ((Float) -> Unit)? = null
@@ -147,6 +156,50 @@ class EditorView @JvmOverloads constructor(
         invalidate()
     }
 
+    /** Rotated size of the image relative to the frame: (w/rw, h/rh) scale factors, and the cover base. */
+    private fun fitFactors(): Triple<Float, Float, Float>? {
+        val b = src ?: return null
+        val w = width.toFloat()
+        val h = height.toFloat()
+        if (w <= 0f || h <= 0f) return null
+        val a = Math.toRadians(angle.toDouble())
+        val c = Math.abs(Math.cos(a)).toFloat()
+        val sn = Math.abs(Math.sin(a)).toFloat()
+        val rw = b.width * c + b.height * sn
+        val rh = b.width * sn + b.height * c
+        val base = maxOf(w / b.width, h / b.height)
+        return Triple(w / rw / base, h / rh / base, base)
+    }
+
+    /** Whole image visible inside the frame (empty bands may remain). */
+    fun fitInside() {
+        val f = fitFactors() ?: return
+        setZoomValue(minOf(f.first, f.second))
+        txN = 0f; tyN = 0f
+        onZoomChanged?.invoke(zoom)
+        invalidate()
+    }
+
+    /** Frame completely covered by the image (parts of the image are cropped). */
+    fun fillFrame() {
+        val f = fitFactors() ?: return
+        setZoomValue(maxOf(f.first, f.second))
+        txN = 0f; tyN = 0f
+        onZoomChanged?.invoke(zoom)
+        invalidate()
+    }
+
+    fun centerImage() {
+        txN = 0f; tyN = 0f
+        invalidate()
+    }
+
+    /** Moves the image by a fraction of the frame size (fine positioning with buttons). */
+    fun nudge(dx: Float, dy: Float) {
+        txN += dx; tyN += dy
+        invalidate()
+    }
+
     fun minZoom() = MIN_ZOOM
     fun maxZoom() = MAX_ZOOM
 
@@ -201,6 +254,11 @@ class EditorView @JvmOverloads constructor(
     override fun onDraw(canvas: Canvas) {
         val w = width.toFloat()
         val h = height.toFloat()
+        val rad = cornerFrac * minOf(w, h)
+        canvas.save()
+        clipPath.reset()
+        clipPath.addRoundRect(0f, 0f, w, h, rad, rad, android.graphics.Path.Direction.CW)
+        canvas.clipPath(clipPath)
         if (bgMode == BG_TRANSPARENT) {
             canvas.drawRect(0f, 0f, w, h, checkerPaint)
         } else {
@@ -214,7 +272,8 @@ class EditorView @JvmOverloads constructor(
         canvas.drawLine(2f * w / 3f, 0f, 2f * w / 3f, h, gridPaint)
         canvas.drawLine(0f, h / 3f, w, h / 3f, gridPaint)
         canvas.drawLine(0f, 2f * h / 3f, w, 2f * h / 3f, gridPaint)
-        canvas.drawRect(0f, 0f, w, h, borderPaint)
+        canvas.restore()
+        canvas.drawRoundRect(1f, 1f, w - 1f, h - 1f, rad, rad, borderPaint)
     }
 
     override fun onTouchEvent(e: MotionEvent): Boolean {

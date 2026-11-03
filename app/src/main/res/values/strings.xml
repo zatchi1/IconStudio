@@ -125,4 +125,8 @@
     <string name="label_zoom">Zoom in / out</string>
     <string name="menu_resize_drag">Resize by dragging</string>
     <string name="toast_no_resize">This widget can\'t be resized</string>
+    <string name="btn_fit">Fit inside</string>
+    <string name="btn_fill">Fill frame</string>
+    <string name="btn_center">Center</string>
+    <string name="size_info">Tile %1$d×%2$d — the frame has this exact shape</string>
 </resources>

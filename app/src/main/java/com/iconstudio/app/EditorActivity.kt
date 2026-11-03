@@ -111,11 +111,13 @@ class EditorActivity : AppCompatActivity() {
                 b.sizeH.maxValue = HomeLayout.ROWS
                 b.sizeH.value = sh
                 b.sizeH.wrapSelectorWheel = false
-                val cw = intent.getIntExtra(EXTRA_CELL_W, 0)
-                val ch = intent.getIntExtra(EXTRA_CELL_H, 0)
                 // The frame always has the shape of the tile it will fill.
                 val update = {
-                    b.editor.aspect = tileAspect(b.sizeW.value, b.sizeH.value, cw, ch, b.showName.isChecked)
+                    val w = b.sizeW.value
+                    val h = b.sizeH.value
+                    b.editor.aspect = tileAspect(w, h)
+                    b.editor.cornerFrac = if (w == 1 && h == 1) 0.24f else 0.12f
+                    b.sizeInfo.text = getString(R.string.size_info, w, h)
                 }
                 b.sizeW.setOnValueChangedListener { _, _, _ -> update() }
                 b.sizeH.setOnValueChangedListener { _, _, _ -> update() }
@@ -128,6 +130,13 @@ class EditorActivity : AppCompatActivity() {
             b.editor.angle = normalize(b.editor.angle + 90f)
             syncControls()
         }
+        b.btnFit.setOnClickListener { b.editor.fitInside(); syncControls() }
+        b.btnFill.setOnClickListener { b.editor.fillFrame(); syncControls() }
+        b.btnCenter.setOnClickListener { b.editor.centerImage() }
+        b.nudgeLeft.setOnClickListener { b.editor.nudge(-0.01f, 0f) }
+        b.nudgeRight.setOnClickListener { b.editor.nudge(0.01f, 0f) }
+        b.nudgeUp.setOnClickListener { b.editor.nudge(0f, -0.01f) }
+        b.nudgeDown.setOnClickListener { b.editor.nudge(0f, 0.01f) }
         b.btnReset.setOnClickListener {
             b.editor.resetTransform()
             syncControls()
@@ -182,15 +191,8 @@ class EditorActivity : AppCompatActivity() {
         io.shutdown()
     }
 
-    /** Width / height of the visible part of a w x h tile (cells are not square, a name takes a strip). */
-    private fun tileAspect(w: Int, h: Int, cw: Int, ch: Int, label: Boolean): Float {
-        if (w == 1 && h == 1) return 1f
-        if (cw <= 0 || ch <= 0) return w.toFloat() / h
-        val d = resources.displayMetrics.density
-        val tw = w * cw - 8 * d
-        val th = h * ch - 8 * d - (if (label) 22 * d else 0f)
-        return (tw / th.coerceAtLeast(1f)).coerceIn(0.2f, 5f)
-    }
+    /** Frame shape = the tile's own shape: 1x1 square, 2x2 square, 3x2 is 3:2, 4x3 is 4:3. */
+    private fun tileAspect(w: Int, h: Int): Float = (w.toFloat() / h).coerceIn(0.2f, 5f)
 
     // ---------------------------------------------------------------- loading images
 

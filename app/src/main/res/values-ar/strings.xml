@@ -123,4 +123,8 @@
     <string name="label_zoom">تكبير / تصغير</string>
     <string name="menu_resize_drag">تغيير الحجم بالسحب</string>
     <string name="toast_no_resize">هذا الويدجت لا يقبل تغيير الحجم</string>
+    <string name="btn_fit">احتواء كامل</string>
+    <string name="btn_fill">ملء الإطار</string>
+    <string name="btn_center">توسيط</string>
+    <string name="size_info">البلاطة %1$d×%2$d — الإطار بنفس شكلها تمامًا</string>
 </resources>

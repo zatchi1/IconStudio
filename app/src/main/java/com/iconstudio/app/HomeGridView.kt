@@ -189,6 +189,16 @@ class ResizeOverlay(ctx: Context, private val item: Placed) : View(ctx) {
     var onDone: (() -> Unit)? = null
     var onCommit: (() -> Unit)? = null
     var onDelete: (() -> Unit)? = null
+    /** Press and hold inside the frame (not on a handle): the item is picked up to be moved. */
+    var onBodyLongPress: (() -> Unit)? = null
+
+    private val bodyLong = Runnable {
+        if (active < 0 && !moved) {
+            bodyFired = true
+            onBodyLongPress?.invoke()
+        }
+    }
+    private var bodyFired = false
 
     private val d = resources.displayMetrics.density
     private val line = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -227,6 +237,13 @@ class ResizeOverlay(ctx: Context, private val item: Placed) : View(ctx) {
             out.add(1 to PointF(r.centerX(), r.top))
             out.add(3 to PointF(r.centerX(), r.bottom))
         }
+        if (allowH && allowV) {
+            // Corners (4 top-left, 5 top-right, 6 bottom-right, 7 bottom-left) resize both ways.
+            out.add(4 to PointF(r.left, r.top))
+            out.add(5 to PointF(r.right, r.top))
+            out.add(6 to PointF(r.right, r.bottom))
+            out.add(7 to PointF(r.left, r.bottom))
+        }
         return out
     }
 
@@ -259,15 +276,27 @@ class ResizeOverlay(ctx: Context, private val item: Placed) : View(ctx) {
                 downX = e.x; downY = e.y; moved = false
                 active = -1
                 val hit = 30 * d
+                // The nearest handle within reach wins (matters on small items where
+                // a corner and a side handle are close together).
+                var best = Double.MAX_VALUE
                 for ((id, p) in handles(r)) {
-                    if (Math.hypot((e.x - p.x).toDouble(), (e.y - p.y).toDouble()) <= hit) {
+                    val dist = Math.hypot((e.x - p.x).toDouble(), (e.y - p.y).toDouble())
+                    if (dist <= hit && dist < best) {
+                        best = dist
                         active = id
-                        parent?.requestDisallowInterceptTouchEvent(true)
-                        break
                     }
                 }
+                if (active >= 0) parent?.requestDisallowInterceptTouchEvent(true)
+                bodyFired = false
+                removeCallbacks(bodyLong)
+                if (active < 0 && onBodyLongPress != null && r.contains(e.x, e.y)) {
+                    postDelayed(bodyLong, android.view.ViewConfiguration.getLongPressTimeout().toLong())
+                }
             }
-            MotionEvent.ACTION_MOVE -> if (active >= 0) {
+            MotionEvent.ACTION_MOVE -> if (active < 0) {
+                val slop = android.view.ViewConfiguration.get(context).scaledTouchSlop
+                if (Math.abs(e.x - downX) > slop || Math.abs(e.y - downY) > slop) removeCallbacks(bodyLong)
+            } else {
                 moved = true
                 val cw = cw()
                 val ch = ch()
@@ -277,31 +306,34 @@ class ResizeOverlay(ctx: Context, private val item: Placed) : View(ctx) {
                 var h = item.h
                 val mw = minOf(minW, w)
                 val mh = minOf(minH, h)
-                when (active) {
-                    0 -> {
-                        val nl = Math.round((e.x - gx()) / cw).coerceIn(0, col + w - mw)
-                        w = col + w - nl; col = nl
-                    }
-                    2 -> {
-                        val nr = Math.round((e.x - gx()) / cw).coerceIn(col + mw, HomeLayout.COLS)
-                        w = nr - col
-                    }
-                    1 -> {
-                        val nt = Math.round((e.y - gy()) / ch).coerceIn(0, row + h - mh)
-                        h = row + h - nt; row = nt
-                    }
-                    3 -> {
-                        val nb = Math.round((e.y - gy()) / ch).coerceIn(row + mh, HomeLayout.ROWS)
-                        h = nb - row
-                    }
-                }
+                val movesL = active == 0 || active == 4 || active == 7
+                val movesR = active == 2 || active == 5 || active == 6
+                val movesT = active == 1 || active == 4 || active == 5
+                val movesB = active == 3 || active == 6 || active == 7
+                val fx = Math.round((e.x - gx()) / cw)
+                val fy = Math.round((e.y - gy()) / ch)
+                var left = col
+                var top = row
+                var right = col + w
+                var bottom = row + h
+                if (movesL) left = fx.coerceIn(0, right - mw)
+                if (movesR) right = fx.coerceIn(left + mw, HomeLayout.COLS)
+                if (movesT) top = fy.coerceIn(0, bottom - mh)
+                if (movesB) bottom = fy.coerceIn(top + mh, HomeLayout.ROWS)
+                col = left
+                row = top
+                w = right - left
+                h = bottom - top
                 if ((col != item.col || row != item.row || w != item.w || h != item.h) &&
                     onTry?.invoke(col, row, w, h) == true
                 ) invalidate()
             }
             MotionEvent.ACTION_UP -> {
+                removeCallbacks(bodyLong)
                 parent?.requestDisallowInterceptTouchEvent(false)
-                if (!moved && active < 0) {
+                if (bodyFired) {
+                    bodyFired = false
+                } else if (!moved && active < 0) {
                     val dp = deleteCentre(r)
                     if (onDelete != null &&
                         Math.hypot((e.x - dp.x).toDouble(), (e.y - dp.y).toDouble()) <= 24 * d
@@ -312,7 +344,10 @@ class ResizeOverlay(ctx: Context, private val item: Placed) : View(ctx) {
                 }
                 active = -1
             }
-            MotionEvent.ACTION_CANCEL -> active = -1
+            MotionEvent.ACTION_CANCEL -> {
+                removeCallbacks(bodyLong)
+                active = -1
+            }
         }
         return true
     }
