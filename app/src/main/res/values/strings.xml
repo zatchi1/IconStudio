@@ -129,4 +129,9 @@
     <string name="btn_fill">Fill frame</string>
     <string name="btn_center">Center</string>
     <string name="size_info">Tile %1$d×%2$d — the frame has this exact shape</string>
+    <string name="title_pages">Pages</string>
+    <string name="section_move_page">Move page</string>
+    <string name="toast_snap_on">Snap to grid: on</string>
+    <string name="toast_snap_off">Free placement: snap to grid is off</string>
+    <string name="search_widgets_hint">Search widgets</string>
 </resources>

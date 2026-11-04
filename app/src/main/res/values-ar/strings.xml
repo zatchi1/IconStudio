@@ -127,4 +127,9 @@
     <string name="btn_fill">ملء الإطار</string>
     <string name="btn_center">توسيط</string>
     <string name="size_info">البلاطة %1$d×%2$d — الإطار بنفس شكلها تمامًا</string>
+    <string name="title_pages">الصفحات</string>
+    <string name="section_move_page">نقل الصفحة</string>
+    <string name="toast_snap_on">الالتقاط إلى الشبكة: مفعّل</string>
+    <string name="toast_snap_off">توزيع حر: الالتقاط إلى الشبكة متوقف</string>
+    <string name="search_widgets_hint">ابحث عن ويدجت</string>
 </resources>

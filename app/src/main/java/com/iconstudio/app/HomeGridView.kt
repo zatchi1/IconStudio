@@ -18,8 +18,21 @@ import kotlin.math.roundToInt
  */
 class HomeGridView(ctx: Context) : ViewGroup(ctx) {
 
-    class LP(var col: Int, var row: Int, var w: Int, var h: Int) :
-        ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+    /**
+     * Cell position + span. A widget may also carry a free rectangle ([xf],[yf],[wf],[hf], in
+     * fractional cell units): then the view really gets that position and size in pixels.
+     */
+    class LP(
+        var col: Int, var row: Int, var w: Int, var h: Int,
+        var xf: Float = Float.NaN, var yf: Float = Float.NaN,
+        var wf: Float = Float.NaN, var hf: Float = Float.NaN
+    ) : ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT) {
+        val free: Boolean get() = !xf.isNaN()
+    }
+
+    companion object {
+        fun lpFor(p: Placed) = LP(p.col, p.row, p.w, p.h, p.fx, p.fy, p.fw, p.fh)
+    }
 
     var pageIndex = 0
     var onDropItem: ((Placed, Int, Int, Int, Boolean) -> Unit)? = null   // item, page, col, row, inCentre
@@ -60,6 +73,7 @@ class HomeGridView(ctx: Context) : ViewGroup(ctx) {
             if (p.page != pageIndex) continue
             val lp = c.layoutParams as LP
             lp.col = p.col; lp.row = p.row; lp.w = p.w; lp.h = p.h
+            lp.xf = p.fx; lp.yf = p.fy; lp.wf = p.fw; lp.hf = p.fh
         }
         requestLayout()
         viewTreeObserver.addOnPreDrawListener(object : android.view.ViewTreeObserver.OnPreDrawListener {
@@ -101,9 +115,11 @@ class HomeGridView(ctx: Context) : ViewGroup(ctx) {
         for (i in 0 until childCount) {
             val c = getChildAt(i)
             val lp = c.layoutParams as LP
+            val wPx = if (lp.free) (cw * lp.wf).roundToInt().coerceAtLeast(1) else cw * lp.w
+            val hPx = if (lp.free) (ch * lp.hf).roundToInt().coerceAtLeast(1) else ch * lp.h
             c.measure(
-                View.MeasureSpec.makeMeasureSpec(cw * lp.w, View.MeasureSpec.EXACTLY),
-                View.MeasureSpec.makeMeasureSpec(ch * lp.h, View.MeasureSpec.EXACTLY)
+                View.MeasureSpec.makeMeasureSpec(wPx, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(hPx, View.MeasureSpec.EXACTLY)
             )
         }
     }
@@ -114,9 +130,9 @@ class HomeGridView(ctx: Context) : ViewGroup(ctx) {
         for (i in 0 until childCount) {
             val c = getChildAt(i)
             val lp = c.layoutParams as LP
-            val x = paddingLeft + lp.col * cw
-            val y = paddingTop + lp.row * ch
-            c.layout(x, y, x + lp.w * cw, y + lp.h * ch)
+            val x = paddingLeft + if (lp.free) (lp.xf * cw).roundToInt() else lp.col * cw
+            val y = paddingTop + if (lp.free) (lp.yf * ch).roundToInt() else lp.row * ch
+            c.layout(x, y, x + c.measuredWidth, y + c.measuredHeight)
         }
     }
 

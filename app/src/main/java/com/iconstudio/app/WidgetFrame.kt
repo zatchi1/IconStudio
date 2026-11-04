@@ -17,15 +17,35 @@ class WidgetFrame(ctx: Context) : FrameLayout(ctx) {
     private val slop = ViewConfiguration.get(ctx).scaledTouchSlop
     private var downX = 0f
     private var downY = 0f
-    private val longRunnable = Runnable { onLongPress?.invoke() }
+    private var fired = false
+    private var downTime = 0L
+    private val longRunnable = Runnable {
+        fired = true
+        // The widget's own views got the touch-down: cancel them, so releasing the finger after
+        // the long press can never also "click" something inside the widget.
+        val c = MotionEvent.obtain(downTime, android.os.SystemClock.uptimeMillis(), MotionEvent.ACTION_CANCEL, downX, downY, 0)
+        cancelChildren(c)
+        c.recycle()
+        onLongPress?.invoke()
+    }
+
+    private fun cancelChildren(c: MotionEvent) {
+        super.dispatchTouchEvent(c)
+    }
 
     init {
         isClickable = true   // so we always receive the whole touch sequence
     }
 
     override fun dispatchTouchEvent(e: MotionEvent): Boolean {
+        if (fired) {
+            // After the long press the rest of this touch belongs to nobody.
+            if (e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_CANCEL) fired = false
+            return true
+        }
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                downTime = e.downTime
                 downX = e.x
                 downY = e.y
                 postDelayed(longRunnable, ViewConfiguration.getLongPressTimeout().toLong())
@@ -40,6 +60,7 @@ class WidgetFrame(ctx: Context) : FrameLayout(ctx) {
 
     override fun onDetachedFromWindow() {
         removeCallbacks(longRunnable)
+        fired = false
         super.onDetachedFromWindow()
     }
 }

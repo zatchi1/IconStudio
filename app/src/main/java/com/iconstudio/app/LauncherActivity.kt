@@ -4,6 +4,7 @@ import android.appwidget.AppWidgetHost
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProviderInfo
 import android.content.BroadcastReceiver
+import android.app.Dialog
 import android.content.ClipData
 import android.content.Context
 import android.content.Intent
@@ -13,6 +14,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Point
 import android.graphics.drawable.BitmapDrawable
+import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
@@ -25,6 +27,7 @@ import android.text.InputType
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
+import android.view.Window
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.InputMethodManager
@@ -112,6 +115,16 @@ class LauncherActivity : AppCompatActivity() {
     private var edgeDy = 0
     private val edgeRunnable = Runnable { edgeNavigate() }
 
+    /**
+     * The widget being edited (frame + handles shown). It is STATE, not a view: pages are rebuilt
+     * often (resume, drag end, package changes...), and every rebuild re-attaches the frame, so
+     * it can only end when the user finishes or cancels the edit.
+     */
+    private var editKey: String? = null
+    /** A widget picked up for a page change: edit mode comes back once the drop is over. */
+    private var pendingReselect: String? = null
+    private val prefs by lazy { getSharedPreferences("launcher_ui", Context.MODE_PRIVATE) }
+
     private var pendingEditKey: String? = null
     private var pendingWidgetId = -1
     private var pendingProvider: AppWidgetProviderInfo? = null
@@ -163,7 +176,8 @@ class LauncherActivity : AppCompatActivity() {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             // A home screen never closes. Back only closes the drawer.
             override fun handleOnBackPressed() {
-                if (isDrawerOpen()) closeDrawer()
+                if (editKey != null) endWidgetEdit()
+                else if (isDrawerOpen()) closeDrawer()
             }
         })
         layout = HomeLayout(this)
@@ -235,6 +249,7 @@ class LauncherActivity : AppCompatActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         // Home button pressed while already on the home screen: go to the main page.
+        endWidgetEdit()
         closeDrawer()
         goToPage(layout.mainPage, true)
     }
@@ -476,7 +491,12 @@ class LauncherActivity : AppCompatActivity() {
             for (item in layout.items.filter { it.page == pageId }) {
                 val v = makeView(item) ?: continue
                 v.tag = item
-                holder.grid.addView(v, HomeGridView.LP(item.col, item.row, item.w, item.h))
+                holder.grid.addView(v, HomeGridView.lpFor(item))
+            }
+            val ek = editKey
+            if (ek != null) {
+                layout.items.firstOrNull { it.key == ek && it.page == pageId }
+                    ?.let { attachEditOverlay(holder.grid, it) }
             }
         }
     }
@@ -777,6 +797,8 @@ class LauncherActivity : AppCompatActivity() {
     }
 
     private fun onDrop(item: Placed, page: Int, col: Int, row: Int, inCentre: Boolean) {
+        val offX = if (item.isFree) item.fx - item.col else 0f
+        val offY = if (item.isFree) item.fy - item.row else 0f
         handler.removeCallbacks(hoverRunnable)
         clearHighlight()
         restoreSnapshot(false)
@@ -818,6 +840,9 @@ class LauncherActivity : AppCompatActivity() {
             toast(R.string.toast_no_room)
             placed = false
         }
+        if (placed && item.isFree) {
+            item.setFree(item.col + offX, item.row + offY, item.fw, item.fh)
+        }
         if (placed && item !in layout.items) {
             // Came from the dock: now it lives on the page.
             layout.items.add(item)
@@ -837,6 +862,10 @@ class LauncherActivity : AppCompatActivity() {
         clearHighlight()
         if (!dropped) restoreSnapshot(false)   // dropped nowhere: everything goes back
         previewActive = false
+        if (pendingReselect != null) {
+            editKey = pendingReselect
+            pendingReselect = null
+        }
         renderDock()
         refreshPages()
         updateDots()
@@ -1178,7 +1207,7 @@ class LauncherActivity : AppCompatActivity() {
 
     private fun showItemMenu(item: Placed) {
         if (item.key.startsWith(WIDGET_PREFIX)) {
-            startResize(item)
+            startWidgetEdit(item)
             return
         }
         if (item.key.startsWith(FOLDER_PREFIX)) {
@@ -1329,33 +1358,170 @@ class LauncherActivity : AppCompatActivity() {
         pw.showAsDropDown(anchor, 0, dp(2), Gravity.END)
     }
 
-    /** Add pages on any side, move the current page, choose the main page, delete an empty page. */
+    // ---- compact card UI shared by the Pages and Widgets menus (same look as the three-dots menu)
+
+    private fun cardDialog(widthDp: Int): Pair<Dialog, LinearLayout> {
+        val dlg = Dialog(this)
+        dlg.requestWindowFeature(Window.FEATURE_NO_TITLE)
+        val card = LinearLayout(this)
+        card.orientation = LinearLayout.VERTICAL
+        card.setBackgroundResource(R.drawable.bg_menu)
+        card.setPadding(dp(14), dp(12), dp(14), dp(10))
+        dlg.setContentView(card)
+        dlg.window?.apply {
+            setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            setLayout(dp(widthDp), ViewGroup.LayoutParams.WRAP_CONTENT)
+            setDimAmount(0.55f)
+            setGravity(Gravity.CENTER)
+        }
+        return dlg to card
+    }
+
+    private fun cardTitle(text: CharSequence) = TextView(this).apply {
+        this.text = text
+        setTextColor(0xFFF2F2F2.toInt())
+        textSize = 15f
+        typeface = android.graphics.Typeface.DEFAULT_BOLD
+        setPadding(dp(2), 0, 0, dp(4))
+    }
+
+    private fun cardSection(text: CharSequence) = TextView(this).apply {
+        this.text = text
+        setTextColor(0xFF9A9A9A.toInt())
+        textSize = 11f
+        setPadding(dp(2), dp(10), 0, dp(5))
+    }
+
+    private fun cardRow(label: CharSequence, danger: Boolean = false, onClick: () -> Unit) =
+        TextView(this).apply {
+            text = label
+            textSize = 13f
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            setTextColor(if (danger) 0xFFFF6B6B.toInt() else 0xFFF2F2F2.toInt())
+            gravity = Gravity.CENTER_VERTICAL
+            minHeight = dp(40)
+            setPadding(dp(10), 0, dp(10), 0)
+            val tv = TypedValue()
+            theme.resolveAttribute(android.R.attr.selectableItemBackground, tv, true)
+            setBackgroundResource(tv.resourceId)
+            setOnClickListener { onClick() }
+        }
+
+    /** A row of equal square-ish buttons. */
+    private class Chip(val glyph: String, val desc: String, val action: () -> Unit)
+
+    private fun chipRow(chips: List<Chip>): LinearLayout {
+        val row = LinearLayout(this)
+        row.orientation = LinearLayout.HORIZONTAL
+        for (chip in chips) {
+            val glyph = chip.glyph
+            val desc = chip.desc
+            val action = chip.action
+            val t = TextView(this)
+            t.text = glyph
+            t.textSize = 17f
+            t.setTextColor(0xFFF2F2F2.toInt())
+            t.gravity = Gravity.CENTER
+            t.contentDescription = desc
+            t.background = GradientDrawable().apply {
+                cornerRadius = dp(10).toFloat()
+                setColor(0x22FFFFFF)
+            }
+            t.setOnClickListener { action() }
+            row.addView(t, LinearLayout.LayoutParams(0, dp(38), 1f).apply {
+                marginStart = dp(3); marginEnd = dp(3)
+            })
+        }
+        return row
+    }
+
+    /**
+     * Pages: a small map of all pages (tap one to go there, the current one is lit, the main one
+     * carries the little house), then compact actions for the page being shown.
+     */
     private fun showPagesMenu() {
         val id = curPageId()
         val (r, c) = layout.locate(id) ?: return
-        val a = ArrayList<Pair<String, () -> Unit>>()
-        a.add(getString(R.string.page_set_main) to {
+        val (dlg, card) = cardDialog(290)
+        card.addView(cardTitle(getString(R.string.title_pages)))
+
+        val map = LinearLayout(this)
+        map.orientation = LinearLayout.VERTICAL
+        map.gravity = Gravity.CENTER_HORIZONTAL
+        for (pagesRow in layout.grid) {
+            val rowL = LinearLayout(this)
+            rowL.orientation = LinearLayout.HORIZONTAL
+            rowL.gravity = Gravity.CENTER
+            for (pid in pagesRow) {
+                val current = pid == id
+                val cell = android.widget.FrameLayout(this)
+                cell.background = GradientDrawable().apply {
+                    cornerRadius = dp(8).toFloat()
+                    setColor(if (current) 0xFFF2F2F2.toInt() else 0x33FFFFFF)
+                    if (!current) setStroke(dp(1), 0x33FFFFFF)
+                }
+                if (layout.mainSet && pid == layout.mainPage) {
+                    val h = ImageView(this)
+                    h.setImageResource(R.drawable.ic_home_dot)
+                    h.setColorFilter(if (current) 0xFF1C1C1E.toInt() else 0xCCFFFFFF.toInt())
+                    cell.addView(h, android.widget.FrameLayout.LayoutParams(dp(14), dp(14), Gravity.CENTER))
+                }
+                cell.setOnClickListener {
+                    if (!current) {
+                        dlg.dismiss()
+                        goToPage(pid, false)
+                        showPagesMenu()
+                    }
+                }
+                rowL.addView(cell, LinearLayout.LayoutParams(dp(30), dp(40)).apply {
+                    setMargins(dp(3), dp(3), dp(3), dp(3))
+                })
+            }
+            map.addView(rowL)
+        }
+        card.addView(map, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ).apply { topMargin = dp(4) })
+
+        card.addView(cardSection(getString(R.string.menu_add_page)))
+        card.addView(chipRow(listOf(
+            Chip("←", getString(R.string.menu_page_left)) { dlg.dismiss(); addPageAndGo(layout.addPageInRow(r, c)) },
+            Chip("→", getString(R.string.menu_page_right)) { dlg.dismiss(); addPageAndGo(layout.addPageInRow(r, c + 1)) },
+            Chip("↑", getString(R.string.menu_page_above)) { dlg.dismiss(); addPageAndGo(layout.addRow(r)) },
+            Chip("↓", getString(R.string.menu_page_below)) { dlg.dismiss(); addPageAndGo(layout.addRow(r + 1)) }
+        )))
+        card.addView(cardSection(getString(R.string.section_move_page)))
+        card.addView(chipRow(listOf(
+            Chip("←", getString(R.string.page_move_left)) { dlg.dismiss(); movePage(id) { layout.movePageHorizontal(id, -1) } },
+            Chip("→", getString(R.string.page_move_right)) { dlg.dismiss(); movePage(id) { layout.movePageHorizontal(id, 1) } },
+            Chip("↑", getString(R.string.page_move_up)) { dlg.dismiss(); movePage(id) { layout.movePageVertical(id, -1) } },
+            Chip("↓", getString(R.string.page_move_down)) { dlg.dismiss(); movePage(id) { layout.movePageVertical(id, 1) } }
+        )))
+
+        val line = View(this)
+        line.setBackgroundColor(0x22FFFFFF)
+        card.addView(line, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1))
+            .apply { setMargins(0, dp(10), 0, dp(4)) })
+        card.addView(cardRow(getString(R.string.page_set_main)) {
+            dlg.dismiss()
             layout.mainPage = id
             layout.mainSet = true
             layout.save()
             updateDots()
             toast(R.string.toast_main_set)
         })
-        if (layout.mainSet) a.add(getString(R.string.page_clear_main) to {
+        if (layout.mainSet) card.addView(cardRow(getString(R.string.page_clear_main)) {
+            dlg.dismiss()
             layout.mainSet = false
             layout.save()
             updateDots()
         })
-        a.add(getString(R.string.menu_page_left) to { addPageAndGo(layout.addPageInRow(r, c)) })
-        a.add(getString(R.string.menu_page_right) to { addPageAndGo(layout.addPageInRow(r, c + 1)) })
-        a.add(getString(R.string.menu_page_above) to { addPageAndGo(layout.addRow(r)) })
-        a.add(getString(R.string.menu_page_below) to { addPageAndGo(layout.addRow(r + 1)) })
-        a.add(getString(R.string.page_move_left) to { movePage(id) { layout.movePageHorizontal(id, -1) } })
-        a.add(getString(R.string.page_move_right) to { movePage(id) { layout.movePageHorizontal(id, 1) } })
-        a.add(getString(R.string.page_move_up) to { movePage(id) { layout.movePageVertical(id, -1) } })
-        a.add(getString(R.string.page_move_down) to { movePage(id) { layout.movePageVertical(id, 1) } })
-        a.add(getString(R.string.menu_delete_page) to { deletePage(id) })
-        showActions(getString(R.string.menu_pages), a)
+        card.addView(cardRow(getString(R.string.menu_delete_page), danger = true) {
+            dlg.dismiss()
+            deletePage(id)
+        })
+        dlg.show()
     }
 
     private fun addPageAndGo(newId: Int) {
@@ -1438,6 +1604,7 @@ class LauncherActivity : AppCompatActivity() {
             col = free.first
             row = free.second
         }
+        item.clearFree()
         item.col = col; item.row = row; item.w = w; item.h = h
         layout.save()
         refreshPages()
@@ -1580,6 +1747,103 @@ class LauncherActivity : AppCompatActivity() {
         }
         resizeOverlay = ov
         g.addView(ov, HomeGridView.LP(0, 0, HomeLayout.COLS, HomeLayout.ROWS))
+    }
+
+    // ================================================================ widget edit mode
+
+    private fun widgetInfo(item: Placed): AppWidgetProviderInfo? =
+        item.key.removePrefix(WIDGET_PREFIX).toIntOrNull()?.let { widgetManager.getAppWidgetInfo(it) }
+
+    private fun removeEditOverlays() {
+        for (g in grids) {
+            for (i in g.childCount - 1 downTo 0) {
+                if (g.getChildAt(i) is WidgetEditOverlay) g.removeViewAt(i)
+            }
+        }
+    }
+
+    /** Enters edit mode for a widget: a permanent frame with handles, move, delete and done. */
+    private fun startWidgetEdit(item: Placed) {
+        if (editKey != null && editKey != item.key) endWidgetEdit()
+        if (!item.isFree) item.setFree(item.col.toFloat(), item.row.toFloat(), item.w.toFloat(), item.h.toFloat())
+        editKey = item.key
+        val info = widgetInfo(item)
+        if (info != null &&
+            info.resizeMode and AppWidgetProviderInfo.RESIZE_HORIZONTAL == 0 &&
+            info.resizeMode and AppWidgetProviderInfo.RESIZE_VERTICAL == 0
+        ) toast(R.string.toast_no_resize)
+        grids.firstOrNull { it.pageIndex == item.page }?.let { attachEditOverlay(it, item) }
+    }
+
+    private fun attachEditOverlay(g: HomeGridView, item: Placed) {
+        for (i in g.childCount - 1 downTo 0) {
+            if (g.getChildAt(i) is WidgetEditOverlay) g.removeViewAt(i)
+        }
+        if (!item.isFree) item.setFree(item.col.toFloat(), item.row.toFloat(), item.w.toFloat(), item.h.toFloat())
+        val ov = WidgetEditOverlay(this, item)
+        val info = widgetInfo(item)
+        if (info != null) {
+            ov.allowH = info.resizeMode and AppWidgetProviderInfo.RESIZE_HORIZONTAL != 0
+            ov.allowV = info.resizeMode and AppWidgetProviderInfo.RESIZE_VERTICAL != 0
+            val (cw, ch) = cellPx()
+            ov.minW = maxOf(0.5f, info.minResizeWidth / cw.toFloat())
+            ov.minH = maxOf(0.5f, info.minResizeHeight / ch.toFloat())
+        }
+        ov.snap = prefs.getBoolean("snap_widgets", false)
+        ov.tryApply = { x, y, w, h ->
+            val c = coverCells(x, y, w, h)
+            if (layout.fits(item.page, c[0], c[1], c[2], c[3], item)) {
+                item.setFree(x, y, w, h)
+                g.syncPositions(false)
+                true
+            } else false
+        }
+        ov.onCommit = { layout.save() }
+        ov.onDelete = {
+            editKey = null
+            g.removeView(ov)
+            removeWidget(item)
+        }
+        ov.onDone = { endWidgetEdit() }
+        ov.onToggleSnap = {
+            val on = !ov.snap
+            ov.snap = on
+            prefs.edit().putBoolean("snap_widgets", on).apply()
+            toast(if (on) R.string.toast_snap_on else R.string.toast_snap_off)
+            if (on) {
+                // Turning the grid on aligns the widget to it right away (when there is room).
+                val w = Math.round(item.fw).coerceIn(1, HomeLayout.COLS)
+                val h = Math.round(item.fh).coerceIn(1, HomeLayout.ROWS)
+                val x = Math.round(item.fx).coerceIn(0, HomeLayout.COLS - w)
+                val y = Math.round(item.fy).coerceIn(0, HomeLayout.ROWS - h)
+                if (ov.tryApply?.invoke(x.toFloat(), y.toFloat(), w.toFloat(), h.toFloat()) == true) {
+                    layout.save()
+                }
+            }
+            ov.invalidate()
+        }
+        // Press and hold (without moving) inside the frame: pick the widget up to move it to
+        // another page. Edit mode returns when it has been dropped.
+        ov.onPickUp = {
+            val v = g.viewOf(item)
+            layout.save()
+            pendingReselect = item.key
+            editKey = null
+            g.removeView(ov)
+            if (v != null) beginDrag(v, item, v) else pendingReselect = null
+        }
+        g.addView(ov, HomeGridView.LP(0, 0, HomeLayout.COLS, HomeLayout.ROWS))
+    }
+
+    private fun endWidgetEdit() {
+        val k = editKey
+        editKey = null
+        pendingReselect = null
+        removeEditOverlays()
+        if (k == null) return
+        layout.items.firstOrNull { it.key == k }?.normalizeIfAligned()
+        layout.save()
+        grids.forEach { it.syncPositions(false) }
     }
 
     // ================================================================ widgets of hidden apps
@@ -1747,19 +2011,35 @@ class LauncherActivity : AppCompatActivity() {
                     toast(R.string.toast_widget_failed)
                     return@runOnUiThread
                 }
+                val dm = resources.displayMetrics
+                val widthDp = minOf(340, (dm.widthPixels / density).toInt() - 32)
+                val (dlg, card) = cardDialog(widthDp)
+                card.addView(cardTitle(getString(R.string.title_widgets)))
+                val search = EditText(this)
+                search.setBackgroundResource(R.drawable.bg_search)
+                search.hint = getString(R.string.search_widgets_hint)
+                search.setHintTextColor(0xFFBBBBBB.toInt())
+                search.setTextColor(Color.WHITE)
+                search.textSize = 13f
+                search.maxLines = 1
+                search.inputType = InputType.TYPE_CLASS_TEXT
+                search.setPadding(dp(14), 0, dp(14), 0)
+                card.addView(search, LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, dp(38)
+                ).apply { topMargin = dp(2); bottomMargin = dp(6) })
                 val list = RecyclerView(this)
                 list.layoutManager = LinearLayoutManager(this)
-                var dialog: AlertDialog? = null
-                list.adapter = WidgetAdapter(options) {
-                    dialog?.dismiss()
+                val adapter = WidgetAdapter(options) {
+                    dlg.dismiss()
                     addWidget(it.info)
                 }
-                list.layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(440))
-                dialog = MaterialAlertDialogBuilder(this)
-                    .setTitle(R.string.title_widgets)
-                    .setView(list)
-                    .setNegativeButton(android.R.string.cancel, null)
-                    .show()
+                list.adapter = adapter
+                search.doAfterTextChanged { adapter.filter(it?.toString().orEmpty()) }
+                card.addView(list, LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    minOf(dp(360), (dm.heightPixels * 0.5f).toInt())
+                ))
+                dlg.show()
             }
         }
     }
@@ -1847,6 +2127,7 @@ class LauncherActivity : AppCompatActivity() {
     }
 
     private fun removeWidget(item: Placed) {
+        if (editKey == item.key) editKey = null
         val id = item.key.removePrefix(WIDGET_PREFIX).toIntOrNull()
         if (id != null) {
             try {
@@ -1865,7 +2146,10 @@ class LauncherActivity : AppCompatActivity() {
         val info = widgetManager.getAppWidgetInfo(id)
         val frame = WidgetFrame(this)
         frame.setPadding(dp(4), dp(4), dp(4), dp(4))
-        frame.onLongPress = { beginDrag(frame, item) }
+        frame.onLongPress = {
+            frame.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+            startWidgetEdit(item)
+        }
         if (info == null) {
             val t = TextView(this)
             t.setText(R.string.widget_unavailable)

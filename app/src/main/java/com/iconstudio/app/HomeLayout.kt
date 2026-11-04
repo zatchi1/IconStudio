@@ -15,7 +15,50 @@ data class Placed(
     var row: Int,
     var w: Int = 1,
     var h: Int = 1
-)
+) {
+    /**
+     * Free placement (widgets only): the REAL position and size in fractional cell units, e.g.
+     * fx=0.5, fw=1.5. NaN = the item is simply aligned to whole cells. [col],[row],[w],[h] always
+     * hold the whole cells this rectangle touches, so icons never end up underneath it.
+     */
+    var fx: Float = Float.NaN
+    var fy: Float = Float.NaN
+    var fw: Float = Float.NaN
+    var fh: Float = Float.NaN
+
+    val isFree: Boolean get() = !fx.isNaN()
+
+    fun setFree(nx: Float, ny: Float, nw: Float, nh: Float) {
+        fx = nx; fy = ny; fw = nw; fh = nh
+        val c = coverCells(nx, ny, nw, nh)
+        col = c[0]; row = c[1]; w = c[2]; h = c[3]
+    }
+
+    fun clearFree() {
+        fx = Float.NaN; fy = Float.NaN; fw = Float.NaN; fh = Float.NaN
+    }
+
+    /** Back to plain whole-cell placement when the free rectangle happens to sit on the grid. */
+    fun normalizeIfAligned() {
+        if (!isFree) return
+        fun near(v: Float) = Math.abs(v - Math.round(v)) < 0.005f
+        if (near(fx) && near(fy) && near(fw) && near(fh)) {
+            col = Math.round(fx); row = Math.round(fy)
+            w = Math.round(fw).coerceAtLeast(1); h = Math.round(fh).coerceAtLeast(1)
+            clearFree()
+        }
+    }
+}
+
+/** (col, row, w, h) of the whole cells touched by the fractional rectangle. */
+fun coverCells(x: Float, y: Float, w: Float, h: Float): IntArray {
+    val eps = 0.004f
+    val c = Math.floor((x + eps).toDouble()).toInt()
+    val r = Math.floor((y + eps).toDouble()).toInt()
+    val c2 = Math.ceil((x + w - eps).toDouble()).toInt()
+    val r2 = Math.ceil((y + h - eps).toDouble()).toInt()
+    return intArrayOf(c, r, (c2 - c).coerceAtLeast(1), (r2 - r).coerceAtLeast(1))
+}
 
 class Folder(val id: String, var name: String, val keys: MutableList<String>)
 
@@ -88,24 +131,12 @@ class HomeLayout(ctx: Context) {
             }
             o.optJSONArray("items")?.let { a ->
                 for (i in 0 until a.length()) {
-                    val x = a.getJSONObject(i)
-                    items.add(
-                        Placed(
-                            x.getString("k"), x.getInt("p"), x.getInt("c"), x.getInt("r"),
-                            x.optInt("w", 1), x.optInt("h", 1)
-                        )
-                    )
+                    items.add(readPlaced(a.getJSONObject(i)))
                 }
             }
             o.optJSONArray("stash")?.let { a ->
                 for (i in 0 until a.length()) {
-                    val x = a.getJSONObject(i)
-                    stash.add(
-                        Placed(
-                            x.getString("k"), x.getInt("p"), x.getInt("c"), x.getInt("r"),
-                            x.optInt("w", 1), x.optInt("h", 1)
-                        )
-                    )
+                    stash.add(readPlaced(a.getJSONObject(i)))
                 }
             }
             readStrings(o.optJSONArray("dock"), dock)
@@ -128,6 +159,30 @@ class HomeLayout(ctx: Context) {
         }
     }
 
+    private fun readPlaced(x: JSONObject): Placed {
+        val p = Placed(
+            x.getString("k"), x.getInt("p"), x.getInt("c"), x.getInt("r"),
+            x.optInt("w", 1), x.optInt("h", 1)
+        )
+        if (x.has("fx") && x.has("fy") && x.has("fw") && x.has("fh")) {
+            p.setFree(
+                x.getDouble("fx").toFloat(), x.getDouble("fy").toFloat(),
+                x.getDouble("fw").toFloat(), x.getDouble("fh").toFloat()
+            )
+        }
+        return p
+    }
+
+    private fun writePlaced(it: Placed): JSONObject {
+        val o = JSONObject().put("k", it.key).put("p", it.page).put("c", it.col)
+            .put("r", it.row).put("w", it.w).put("h", it.h)
+        if (it.isFree) {
+            o.put("fx", it.fx.toDouble()).put("fy", it.fy.toDouble())
+                .put("fw", it.fw.toDouble()).put("fh", it.fh.toDouble())
+        }
+        return o
+    }
+
     private fun readStrings(a: JSONArray?, into: MutableCollection<String>) {
         if (a == null) return
         for (i in 0 until a.length()) into.add(a.getString(i))
@@ -143,20 +198,10 @@ class HomeLayout(ctx: Context) {
         grid.forEach { g.put(JSONArray(it)) }
         o.put("grid", g)
         val a = JSONArray()
-        items.forEach {
-            a.put(
-                JSONObject().put("k", it.key).put("p", it.page).put("c", it.col)
-                    .put("r", it.row).put("w", it.w).put("h", it.h)
-            )
-        }
+        items.forEach { a.put(writePlaced(it)) }
         o.put("items", a)
         val sa = JSONArray()
-        stash.forEach {
-            sa.put(
-                JSONObject().put("k", it.key).put("p", it.page).put("c", it.col)
-                    .put("r", it.row).put("w", it.w).put("h", it.h)
-            )
-        }
+        stash.forEach { sa.put(writePlaced(it)) }
         o.put("stash", sa)
         o.put("dock", JSONArray(dock))
         o.put("known", JSONArray(known.toList()))
