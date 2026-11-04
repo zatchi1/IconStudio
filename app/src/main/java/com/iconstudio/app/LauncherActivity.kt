@@ -85,7 +85,7 @@ class LauncherActivity : AppCompatActivity() {
     private val handler = Handler(Looper.getMainLooper())
 
     private var apps: List<AppItem> = emptyList()
-    private var appByKey: Map<String, AppItem> = emptyMap()
+    @Volatile private var appByKey: Map<String, AppItem> = emptyMap()
     private var custom: Map<String, IconEntry> = emptyMap()
     private val bitmapCache = HashMap<String, Pair<Long, Drawable>>()
 
@@ -156,13 +156,69 @@ class LauncherActivity : AppCompatActivity() {
             if (r.resultCode == RESULT_OK) onWidgetBound() else cancelPendingWidget()
         }
 
+    private var packageReceiverRegistered = false
+
+    /**
+     * Installs, updates, removals and enable/disable changes. It is registered for the whole life
+     * of the home screen (not only while it is on screen): installing from a store happens while
+     * this activity is stopped, and that is exactly when the old code missed the event.
+     */
     private val packageReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             // An app being updated is briefly "removed"; ignore that so its place is kept.
             if (intent.action == Intent.ACTION_PACKAGE_REMOVED &&
                 intent.getBooleanExtra(Intent.EXTRA_REPLACING, false)
             ) return
-            loadApps()
+            // Added / replaced / removed: rebuild everything (icon or name may have changed).
+            // Changed (components enabled or disabled): only when the app list itself differs.
+            val force = intent.action != Intent.ACTION_PACKAGE_CHANGED
+            scheduleReload(force)
+        }
+    }
+
+    private val reloadRunnable = Runnable { loadApps(true) }
+    private val softReloadRunnable = Runnable { loadApps(false) }
+    private val lateReloadRunnable = Runnable { loadApps(false) }
+
+    /** Several broadcasts often arrive together for one install: merge them into one reload. */
+    private fun scheduleReload(force: Boolean) {
+        if (isDestroyed || isFinishing) return
+        if (force) {
+            handler.removeCallbacks(reloadRunnable)
+            handler.postDelayed(reloadRunnable, 250L)
+        } else {
+            handler.removeCallbacks(softReloadRunnable)
+            handler.postDelayed(softReloadRunnable, 250L)
+        }
+        // Safety net: if the package manager was a little late, check again shortly after.
+        handler.removeCallbacks(lateReloadRunnable)
+        handler.postDelayed(lateReloadRunnable, 2500L)
+    }
+
+    private fun registerPackageReceiver() {
+        if (packageReceiverRegistered) return
+        val f = IntentFilter().apply {
+            addAction(Intent.ACTION_PACKAGE_ADDED)
+            addAction(Intent.ACTION_PACKAGE_REMOVED)
+            addAction(Intent.ACTION_PACKAGE_REPLACED)
+            addAction(Intent.ACTION_PACKAGE_CHANGED)
+            addDataScheme("package")
+        }
+        try {
+            ContextCompat.registerReceiver(this, packageReceiver, f, ContextCompat.RECEIVER_EXPORTED)
+            packageReceiverRegistered = true
+        } catch (e: Exception) {
+            // The resume check below still keeps the list right.
+        }
+    }
+
+    private fun unregisterPackageReceiver() {
+        if (!packageReceiverRegistered) return
+        packageReceiverRegistered = false
+        try {
+            unregisterReceiver(packageReceiver)
+        } catch (e: Exception) {
+            // not registered
         }
     }
 
@@ -208,18 +264,13 @@ class LauncherActivity : AppCompatActivity() {
         b.search.setOnFocusChangeListener { _, focused -> b.search.isCursorVisible = focused }
         b.search.doAfterTextChanged { renderDrawer() }
 
+        registerPackageReceiver()
         loadApps()
     }
 
     override fun onStart() {
         super.onStart()
-        val f = IntentFilter().apply {
-            addAction(Intent.ACTION_PACKAGE_ADDED)
-            addAction(Intent.ACTION_PACKAGE_REMOVED)
-            addAction(Intent.ACTION_PACKAGE_REPLACED)
-            addDataScheme("package")
-        }
-        ContextCompat.registerReceiver(this, packageReceiver, f, ContextCompat.RECEIVER_EXPORTED)
+        registerPackageReceiver()   // no-op when already registered
         try {
             widgetHost.startListening()
         } catch (e: Exception) {
@@ -230,11 +281,6 @@ class LauncherActivity : AppCompatActivity() {
     override fun onStop() {
         super.onStop()
         try {
-            unregisterReceiver(packageReceiver)
-        } catch (e: Exception) {
-            // not registered
-        }
-        try {
             widgetHost.stopListening()
         } catch (e: Exception) {
             // ignore
@@ -244,6 +290,9 @@ class LauncherActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         if (apps.isNotEmpty()) render()
+        // Whatever happened while we were away (install, update, uninstall from a store...):
+        // compare with what is installed now and rebuild only if it differs. Cheap when nothing changed.
+        loadApps(false)
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -256,6 +305,7 @@ class LauncherActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        unregisterPackageReceiver()
         handler.removeCallbacksAndMessages(null)
         io.shutdown()
     }
@@ -275,11 +325,31 @@ class LauncherActivity : AppCompatActivity() {
 
     // ================================================================ data
 
-    private fun loadApps() {
-        io.execute {
+    /**
+     * Reads the installed launchable apps. [force] = false skips the work (and the redraw) when
+     * the set of apps is the same as what is already shown.
+     */
+    private fun loadApps(force: Boolean = true) {
+        if (io.isShutdown) return
+        try {
+            io.execute { loadAppsNow(force) }
+        } catch (e: java.util.concurrent.RejectedExecutionException) {
+            // closing down
+        }
+    }
+
+    private fun loadAppsNow(force: Boolean) {
+        run {
             val pm = packageManager
             val query = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-            val list = pm.queryIntentActivities(query, 0)
+            val found = pm.queryIntentActivities(query, 0)
+            val current = appByKey
+            // A momentary empty answer from the system must not wipe the screen.
+            if (found.isEmpty() && current.isNotEmpty()) return
+            if (!force && current.isNotEmpty() && found.size == current.size &&
+                found.all { current.containsKey(it.activityInfo.packageName + "/" + it.activityInfo.name) }
+            ) return
+            val list = found
                 .map {
                     val pkg = it.activityInfo.packageName
                     val act = it.activityInfo.name
@@ -365,18 +435,43 @@ class LauncherActivity : AppCompatActivity() {
             .associateBy { it.pkg + "/" + it.activity }
     }
 
-    private fun customDrawable(e: IconEntry): Drawable? {
-        val cached = bitmapCache[e.id]
+    /**
+     * The custom icon drawn for a [w] x [h] tile (1x1 = a normal square icon). The saved image is
+     * used as is when it already has that shape; otherwise it is re-rendered from the source
+     * image with the same zoom / position / rotation, so it is never stretched or badly cropped,
+     * whichever way (home long-press, drawer, dock or the Zatchi editor) the icon was made.
+     */
+    private fun customDrawable(e: IconEntry, w: Int = 1, h: Int = 1): Drawable? {
+        val cacheKey = "${e.id}@${w}x$h"
+        val cached = bitmapCache[cacheKey]
         if (cached != null && cached.first == e.updatedAt) return cached.second
-        val bmp = BitmapFactory.decodeFile(IconStore.get(this).iconFile(e.id).path) ?: return null
+        val store = IconStore.get(this)
+        val saved = BitmapFactory.decodeFile(store.iconFile(e.id).path)
+        val want = (w.toFloat() / h.coerceAtLeast(1)).coerceIn(0.2f, 5f)
+        var bmp = saved
+        if (saved == null || kotlin.math.abs(saved.width.toFloat() / saved.height - want) > want * 0.03f) {
+            val src = BitmapFactory.decodeFile(store.sourceFile(e.srcFile).path)
+            if (src != null) {
+                try {
+                    bmp = ImageUtils.render(
+                        src, EditorState(e.zoom, e.tx, e.ty, e.angle, e.bg), want, 512
+                    )
+                } catch (ex: Exception) {
+                    // keep the saved image
+                } catch (ex: OutOfMemoryError) {
+                    // keep the saved image
+                }
+            }
+        }
+        if (bmp == null) return null
         val d = BitmapDrawable(resources, bmp)
-        bitmapCache[e.id] = e.updatedAt to d
+        bitmapCache[cacheKey] = e.updatedAt to d
         return d
     }
 
-    private fun cellFor(a: AppItem): Cell {
+    private fun cellFor(a: AppItem, w: Int = 1, h: Int = 1): Cell {
         val e = custom[a.key]
-        val d = e?.let { customDrawable(it) }
+        val d = e?.let { customDrawable(it, w, h) }
         return if (e != null && d != null) Cell(a, e.label, d, true, e.showLabel) else Cell(a, a.label, a.icon, false)
     }
 
@@ -552,7 +647,7 @@ class LauncherActivity : AppCompatActivity() {
         if (item.key.startsWith(FOLDER_PREFIX)) return makeFolderView(item)
         val app = appByKey[item.key] ?: return null
         if (app.key in layout.hidden) return null
-        val cell = cellFor(app)
+        val cell = cellFor(app, item.w, item.h)
         return if (item.w == 1 && item.h == 1) {
             val vb = ItemAppBinding.inflate(layoutInflater)
             bindIcon(vb, cell)
@@ -1192,11 +1287,115 @@ class LauncherActivity : AppCompatActivity() {
 
     // ================================================================ menus
 
+    /** Icon for each long-press entry, matched by its (translated) label. Unknown labels get none. */
+    private fun actionIconFor(label: String): Int? {
+        val map = mapOf(
+            R.string.menu_open to R.drawable.ic_a_open,
+            R.string.menu_change_icon to R.drawable.ic_m_edit,
+            R.string.menu_reset_icon to R.drawable.ic_a_restore,
+            R.string.menu_resize_drag to R.drawable.ic_a_resize,
+            R.string.menu_size to R.drawable.ic_a_size,
+            R.string.menu_add_dock to R.drawable.ic_a_dock,
+            R.string.menu_to_home to R.drawable.ic_a_home,
+            R.string.menu_add_home to R.drawable.ic_a_home,
+            R.string.menu_remove_home to R.drawable.ic_a_remove,
+            R.string.menu_remove_from_folder to R.drawable.ic_a_remove,
+            R.string.menu_lock to R.drawable.ic_a_lock,
+            R.string.menu_unlock to R.drawable.ic_a_unlock,
+            R.string.menu_hide to R.drawable.ic_m_hidden,
+            R.string.menu_unhide to R.drawable.ic_m_hidden,
+            R.string.menu_app_info to R.drawable.ic_a_info,
+            R.string.menu_uninstall to R.drawable.ic_delete,
+            R.string.menu_remove_widget to R.drawable.ic_delete,
+            R.string.menu_rename to R.drawable.ic_m_edit,
+            R.string.menu_dissolve to R.drawable.ic_apps
+        )
+        for ((res, icon) in map) if (getString(res) == label) return icon
+        return null
+    }
+
+    /**
+     * The long-press / action menu: a small dark rounded card (same look as the three-dots menu)
+     * with a tidy icon + label per entry. Same entries, same actions; only the look changed.
+     */
     private fun showActions(title: String, actions: List<Pair<String, () -> Unit>>) {
-        MaterialAlertDialogBuilder(this)
-            .setTitle(title)
-            .setItems(actions.map { it.first }.toTypedArray()) { _, i -> actions[i].second() }
-            .show()
+        val (dlg, card) = cardDialog(236)
+        card.setPadding(dp(6), dp(12), dp(6), dp(6))
+
+        val head = TextView(this)
+        head.text = title
+        head.setTextColor(0xFFF2F2F2.toInt())
+        head.textSize = 14f
+        head.typeface = android.graphics.Typeface.DEFAULT_BOLD
+        head.maxLines = 1
+        head.ellipsize = android.text.TextUtils.TruncateAt.END
+        head.gravity = Gravity.START or Gravity.CENTER_VERTICAL
+        head.setPadding(dp(12), 0, dp(12), dp(8))
+        card.addView(head, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+
+        val sep = View(this)
+        sep.setBackgroundColor(0x22FFFFFF)
+        card.addView(sep, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1))
+            .apply { setMargins(dp(8), 0, dp(8), dp(4)) })
+
+        val list = LinearLayout(this)
+        list.orientation = LinearLayout.VERTICAL
+        val withIcons = actions.any { actionIconFor(it.first) != null }
+        val uninstallLabel = getString(R.string.menu_uninstall)
+        val sel = TypedValue()
+        theme.resolveAttribute(android.R.attr.selectableItemBackground, sel, true)
+
+        for ((i, a) in actions.withIndex()) {
+            val danger = a.first == uninstallLabel
+            if (danger && i > 0) {
+                val line = View(this)
+                line.setBackgroundColor(0x22FFFFFF)
+                list.addView(line, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1))
+                    .apply { setMargins(dp(8), dp(4), dp(8), dp(4)) })
+            }
+            val row = LinearLayout(this)
+            row.orientation = LinearLayout.HORIZONTAL
+            row.gravity = Gravity.CENTER_VERTICAL
+            row.setPadding(dp(12), 0, dp(12), 0)
+            row.setBackgroundResource(sel.resourceId)
+            val color = if (danger) 0xFFFF6B6B.toInt() else 0xFFF2F2F2.toInt()
+            if (withIcons) {
+                val iv = ImageView(this)
+                val ic = actionIconFor(a.first)
+                if (ic != null) {
+                    iv.setImageResource(ic)
+                    iv.setColorFilter(color)
+                    iv.alpha = if (danger) 1f else 0.85f
+                }
+                row.addView(iv, LinearLayout.LayoutParams(dp(18), dp(18)).apply { marginEnd = dp(12) })
+            }
+            val t = TextView(this)
+            t.text = a.first
+            t.setTextColor(color)
+            t.textSize = 13f
+            t.maxLines = 1
+            t.ellipsize = android.text.TextUtils.TruncateAt.END
+            t.gravity = Gravity.START or Gravity.CENTER_VERTICAL
+            row.addView(t, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            row.setOnClickListener {
+                dlg.dismiss()
+                a.second()
+            }
+            list.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(40)))
+        }
+
+        // Long lists (e.g. hidden apps) scroll instead of running off the screen.
+        val maxH = (resources.displayMetrics.heightPixels * 0.6f).toInt()
+        val scroll = object : android.widget.ScrollView(this@LauncherActivity) {
+            override fun onMeasure(widthSpec: Int, heightSpec: Int) {
+                super.onMeasure(widthSpec, View.MeasureSpec.makeMeasureSpec(maxH, View.MeasureSpec.AT_MOST))
+            }
+        }
+        scroll.isVerticalScrollBarEnabled = false
+        scroll.overScrollMode = View.OVER_SCROLL_NEVER
+        scroll.addView(list, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        card.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        dlg.show()
     }
 
     private fun lockActions(app: AppItem, into: MutableList<Pair<String, () -> Unit>>) {
@@ -1587,7 +1786,7 @@ class LauncherActivity : AppCompatActivity() {
     private fun resetIcon(app: AppItem) {
         val e = custom[app.key] ?: return
         IconStore.get(this).delete(e.id)
-        bitmapCache.remove(e.id)
+        bitmapCache.keys.removeAll { it.startsWith(e.id + "@") }
         render()
     }
 

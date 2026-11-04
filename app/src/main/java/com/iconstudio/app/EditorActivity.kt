@@ -77,6 +77,11 @@ class EditorActivity : AppCompatActivity() {
             existing = IconStore.get(this).findLauncher(pkg, activityName)
         }
         entry = existing
+        // Opened from the Zatchi shortcuts screen for an app that already has a home-screen icon:
+        // start from that icon, so both ways of changing an icon work on the same image.
+        val seed = if (!applyMode && existing == null) {
+            IconStore.get(this).findLauncher(pkg, activityName)
+        } else null
         appLabel = existing?.appLabel
             ?: intent.getStringExtra(EXTRA_APP_LABEL).orEmpty().ifEmpty { pkg }
 
@@ -179,7 +184,7 @@ class EditorActivity : AppCompatActivity() {
             b.editor.bgMode = bgFromId(checkedId)
         }
 
-        if (existing != null) restore(existing) else {
+        if (existing != null) restore(existing) else if (seed != null) restore(seed) else {
             b.nameInput.setText(appLabel)
             loadOriginalIcon()
         }
@@ -290,6 +295,7 @@ class EditorActivity : AppCompatActivity() {
         val output = b.editor.renderOutput(if (applyMode) LAUNCHER_ICON_SIZE else ICON_SIZE) ?: return
         val previous = entry
         val needSource = sourceDirty || previous == null
+        val frameAspect = b.editor.aspect
 
         b.btnSave.isEnabled = false
         io.execute {
@@ -315,6 +321,9 @@ class EditorActivity : AppCompatActivity() {
                     showLabel = if (applyMode) b.showName.isChecked else true
                 )
                 store.upsert(e)
+                // One icon per app: a shortcut made from the Zatchi screens also becomes the icon
+                // the Zatchi home screen draws, with the same image and the same adjustments.
+                if (!applyMode) syncLauncherIcon(store, src, state, label, frameAspect)
                 e
             } catch (ex: Exception) {
                 null
@@ -358,6 +367,38 @@ class EditorActivity : AppCompatActivity() {
                     ShortcutHelper.Result.FAILED -> toast(R.string.toast_failed)
                 }
             }
+        }
+    }
+
+    /** Keeps the home-screen (launcher) icon of this app in step with what was just saved. */
+    private fun syncLauncherIcon(
+        store: IconStore, src: Bitmap, state: EditorState, label: String, aspect: Float
+    ) {
+        try {
+            val old = store.findLauncher(pkg, activityName)
+            val id = old?.id ?: IconStore.newId()
+            val srcName = store.saveSource(id, src)
+            store.saveIcon(id, ImageUtils.render(src, state, aspect, LAUNCHER_ICON_SIZE))
+            store.upsert(
+                IconEntry(
+                    id = id,
+                    pkg = pkg,
+                    activity = activityName,
+                    appLabel = appLabel,
+                    label = label,
+                    srcFile = srcName,
+                    zoom = state.zoom,
+                    tx = state.tx,
+                    ty = state.ty,
+                    angle = state.angle,
+                    bg = state.bg,
+                    updatedAt = System.currentTimeMillis(),
+                    launcher = true,
+                    showLabel = old?.showLabel ?: true
+                )
+            )
+        } catch (ex: Exception) {
+            // The shortcut itself was saved; the home screen icon will simply stay as it was.
         }
     }
 

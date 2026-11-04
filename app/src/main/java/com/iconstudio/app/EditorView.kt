@@ -233,22 +233,11 @@ class EditorView @JvmOverloads constructor(
         invalidate()
     }
 
-    private fun bgColor(): Int = when (bgMode) {
-        BG_BLACK -> Color.BLACK
-        BG_WHITE -> Color.WHITE
-        BG_GRAY -> 0xFF3A3A3A.toInt()
-        else -> Color.TRANSPARENT
-    }
+    private fun bgColor(): Int = ImageUtils.bgColor(bgMode)
 
     private fun buildMatrix(out: Matrix, w: Float, h: Float) {
         val b = src ?: return
-        val base = maxOf(w / b.width, h / b.height)
-        val s = base * zoom
-        out.reset()
-        out.postTranslate(-b.width / 2f, -b.height / 2f)
-        out.postRotate(angle)
-        out.postScale(s, s)
-        out.postTranslate(w / 2f + txN * w, h / 2f + tyN * h)
+        ImageUtils.buildMatrix(out, b.width, b.height, w, h, getState())
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -322,14 +311,6 @@ class EditorView @JvmOverloads constructor(
     /** Renders exactly what is inside the frame (long side = [outSize]); transparent if chosen. */
     fun renderOutput(outSize: Int): Bitmap? {
         val b = src ?: return null
-        val ow = if (aspect >= 1f) outSize else (outSize * aspect).toInt().coerceAtLeast(1)
-        val oh = if (aspect >= 1f) (outSize / aspect).toInt().coerceAtLeast(1) else outSize
-        val out = Bitmap.createBitmap(ow, oh, Bitmap.Config.ARGB_8888)
-        val c = Canvas(out)
-        if (bgMode != BG_TRANSPARENT) c.drawColor(bgColor())
-        val m = Matrix()
-        buildMatrix(m, ow.toFloat(), oh.toFloat())
-        c.drawBitmap(b, m, bmpPaint)
-        return out
+        return ImageUtils.render(b, getState(), aspect, outSize)
     }
 }

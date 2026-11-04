@@ -3,7 +3,10 @@ package com.iconstudio.app
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.Matrix
+import android.graphics.Paint
 import android.media.ExifInterface
 import android.net.Uri
 import kotlin.math.max
@@ -78,5 +81,49 @@ object ImageUtils {
         } catch (e: OutOfMemoryError) {
             null
         }
+    }
+
+    // ------------------------------------------------------------------ icon rendering
+    // One single place that turns (source image + editor state + frame shape) into pixels.
+    // The editor preview, the saved icon and the launcher all use it, so they always agree.
+
+    private val renderPaint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
+
+    fun bgColor(mode: Int): Int = when (mode) {
+        EditorView.BG_BLACK -> Color.BLACK
+        EditorView.BG_WHITE -> Color.WHITE
+        EditorView.BG_GRAY -> 0xFF3A3A3A.toInt()
+        else -> Color.TRANSPARENT
+    }
+
+    /** Maps the source image into a frame of [w] x [h] pixels (cover scale * zoom, rotated, moved). */
+    fun buildMatrix(out: Matrix, srcW: Int, srcH: Int, w: Float, h: Float, s: EditorState) {
+        val base = maxOf(w / srcW, h / srcH)
+        val sc = base * s.zoom
+        out.reset()
+        out.postTranslate(-srcW / 2f, -srcH / 2f)
+        out.postRotate(s.angle)
+        out.postScale(sc, sc)
+        out.postTranslate(w / 2f + s.tx * w, h / 2f + s.ty * h)
+    }
+
+    /** Frame size in pixels for a frame shape [aspect] (width / height) whose long side is [outSize]. */
+    fun frameSize(aspect: Float, outSize: Int): Pair<Int, Int> {
+        val a = aspect.coerceIn(0.2f, 5f)
+        val ow = if (a >= 1f) outSize else (outSize * a).toInt().coerceAtLeast(1)
+        val oh = if (a >= 1f) (outSize / a).toInt().coerceAtLeast(1) else outSize
+        return ow to oh
+    }
+
+    /** Renders exactly what the editor frame shows, for a frame of shape [aspect]. Never stretches. */
+    fun render(src: Bitmap, s: EditorState, aspect: Float, outSize: Int): Bitmap {
+        val (ow, oh) = frameSize(aspect, outSize)
+        val out = Bitmap.createBitmap(ow, oh, Bitmap.Config.ARGB_8888)
+        val c = Canvas(out)
+        if (s.bg != EditorView.BG_TRANSPARENT) c.drawColor(bgColor(s.bg))
+        val m = Matrix()
+        buildMatrix(m, src.width, src.height, ow.toFloat(), oh.toFloat(), s)
+        c.drawBitmap(src, m, renderPaint)
+        return out
     }
 }
