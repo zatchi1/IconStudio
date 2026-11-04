@@ -10,6 +10,32 @@
         android:layout_height="match_parent"
         android:orientation="vertical">
 
+        <!-- Own fixed row above the pages (not an overlay), so page icons never sit under it. -->
+        <FrameLayout
+            android:id="@+id/header"
+            android:layout_width="match_parent"
+            android:layout_height="40dp">
+
+            <ImageButton
+                android:id="@+id/btnSearch"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_gravity="start|center_vertical"
+                android:layout_marginStart="8dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/search_hint"
+                android:src="@drawable/ic_search" />
+
+            <ImageButton
+                android:id="@+id/menuBtn"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_gravity="end|center_vertical"
+                android:layout_marginEnd="8dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/menu_home_settings"
+                android:src="@drawable/ic_more" />
+        </FrameLayout>
 
         <androidx.viewpager2.widget.ViewPager2
             android:id="@+id/pager"
@@ -33,33 +59,6 @@
             android:minHeight="76dp"
             android:orientation="horizontal" />
     </LinearLayout>
-
-    <FrameLayout
-    android:id="@+id/header"
-    android:layout_width="match_parent"
-    android:layout_height="wrap_content"
-    android:minHeight="40dp">
-
-        <ImageButton
-            android:id="@+id/btnSearch"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
-            android:layout_gravity="start|center_vertical"
-            android:layout_marginStart="8dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="@string/search_hint"
-            android:src="@drawable/ic_search" />
-
-        <ImageButton
-            android:id="@+id/menuBtn"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
-            android:layout_gravity="end|center_vertical"
-            android:layout_marginEnd="8dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="@string/menu_home_settings"
-            android:src="@drawable/ic_more" />
-    </FrameLayout>
 
     <LinearLayout
         android:id="@+id/vdots"

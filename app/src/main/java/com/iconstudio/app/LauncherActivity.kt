@@ -159,7 +159,7 @@ class LauncherActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         b = ActivityLauncherBinding.inflate(layoutInflater)
         setContentView(b.root)
-        edgeToEdge(b.content, b.drawer, b.header)
+        edgeToEdge(b.content, b.drawer)
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             // A home screen never closes. Back only closes the drawer.
             override fun handleOnBackPressed() {
@@ -1561,14 +1561,9 @@ class LauncherActivity : AppCompatActivity() {
             } else false
         }
         ov.onCommit = {
+            // The widget view reports its new size itself from its layout listener
+            // (see makeWidgetView), so only the layout needs saving here.
             layout.save()
-            val frame = g.viewOf(item) as? WidgetFrame
-            frame?.post {
-                val hv = frame.getChildAt(0) as? android.appwidget.AppWidgetHostView
-                val wDp = (frame.width / density).toInt()
-                val hDp = (frame.height / density).toInt()
-                if (hv != null && wDp > 0 && hDp > 0) hv.updateAppWidgetSize(Bundle(), wDp, hDp, wDp, hDp)
-            }
         }
         ov.onDone = {
             layout.save()
@@ -1883,11 +1878,21 @@ class LauncherActivity : AppCompatActivity() {
         // Application context: the AppCompat activity context breaks widget inflation.
         val hv = widgetHost.createView(applicationContext, id, info)
         frame.addView(hv, matchParams())
-        // Tell the widget how much room it really has, so it picks a matching layout.
-        frame.post {
-            val wDp = (frame.width / density).toInt()
-            val hDp = (frame.height / density).toInt()
-            if (wDp > 0 && hDp > 0) hv.updateAppWidgetSize(Bundle(), wDp, hDp, wDp, hDp)
+        // Tell the widget how much room it really has, so it picks a matching layout. This must
+        // follow the widget view's REAL laid-out size: a post() right after creation runs before
+        // the first layout (size 0), so the size used to be skipped and the widget kept a stale
+        // layout (e.g. a cropped Google logo) until some later rebuild.
+        var sentW = -1
+        var sentH = -1
+        hv.addOnLayoutChangeListener { v, l, t, r, bt, _, _, _, _ ->
+            val wDp = ((r - l) / density).toInt()
+            val hDp = ((bt - t) / density).toInt()
+            if (wDp > 0 && hDp > 0 && (wDp != sentW || hDp != sentH)) {
+                sentW = wDp
+                sentH = hDp
+                (v as android.appwidget.AppWidgetHostView)
+                    .updateAppWidgetSize(Bundle(), wDp, hDp, wDp, hDp)
+            }
         }
         return frame
     }
