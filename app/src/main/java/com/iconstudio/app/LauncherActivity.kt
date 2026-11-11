@@ -93,7 +93,20 @@ class LauncherActivity : AppCompatActivity() {
     private val rowCol = HashMap<Int, Int>()     // row index -> column currently shown in it
     private var openedMain = false
 
-    private val drawerAdapter = AppGridAdapter({ closeDrawer(); open(it) }, { showDrawerMenu(it) })
+    /**
+     * One icon size for the whole launcher (home pages, dock, folders, app drawer). It depends only
+     * on the screen width, so icons never change size when something else on the screen changes.
+     */
+    private val iconPx: Int by lazy {
+        val cellW = (resources.displayMetrics.widthPixels - dp(12)) / HomeLayout.COLS
+        (cellW * 0.72f).toInt().coerceIn(dp(44), dp(62))
+    }
+
+    private val drawerAdapter = AppGridAdapter(
+        { closeDrawer(); open(it) },
+        { showDrawerMenu(it) },
+        { iconPx }
+    )
 
     private class Snap(val item: Placed, val page: Int, val col: Int, val row: Int)
 
@@ -199,6 +212,9 @@ class LauncherActivity : AppCompatActivity() {
         b.grid.adapter = drawerAdapter
 
         b.dock.setOnDragListener { _, e -> onDockDrag(e) }
+        // The strip with the page dots sits right above the dock: dropping there counts as dropping
+        // on the dock, so moving an app down from the pages is easy to hit.
+        b.dots.setOnDragListener { _, e -> onDockDrag(e) }
         b.dots.setOnLongClickListener { showPagesMenu(); true }
         b.vdots.setOnLongClickListener { showPagesMenu(); true }
         b.btnSearch.setOnClickListener { openDrawer(true) }
@@ -592,22 +608,29 @@ class LauncherActivity : AppCompatActivity() {
     }
 
     /**
-     * Sizes the icon from the real cell size so the icon and its name always fit, whatever the
-     * screen, instead of using a fixed size that can push the name out of the cell.
+     * Gives every icon the same fixed size ([iconPx]). It only gets smaller when a cell is too
+     * short to hold the icon and its name, and then it does so identically for all icons.
      */
+    @Suppress("UNUSED_PARAMETER")
     private fun fitIcon(root: View, icon: View, label: View) {
-        root.addOnLayoutChangeListener { _, l, t, r, bt, _, _, _, _ ->
-            val w = r - l
+        // Same size for every icon, set right away (no waiting for a layout pass).
+        setSquare(icon, iconPx)
+        root.addOnLayoutChangeListener { _, _, t, _, bt, _, _, _, _ ->
             val h = bt - t
-            if (w <= 0 || h <= 0) return@addOnLayoutChangeListener
-            val reserved = if (label.visibility == View.VISIBLE) dp(24) else dp(8)   // name line + gaps
-            val s = minOf((w * 0.70f).toInt(), h - reserved).coerceAtLeast(dp(28))
-            val lp = icon.layoutParams
-            if (lp.width != s || lp.height != s) {
-                lp.width = s
-                lp.height = s
-                icon.layoutParams = lp
-            }
+            if (h <= 0) return@addOnLayoutChangeListener
+            // The name line is always reserved (even when hidden), so the size does not depend on
+            // it. Icons only get smaller when a cell is too short to hold an icon and a name.
+            val s = minOf(iconPx, (h - dp(24)).coerceAtLeast(dp(28)))
+            setSquare(icon, s)
+        }
+    }
+
+    private fun setSquare(v: View, s: Int) {
+        val lp = v.layoutParams ?: return
+        if (lp.width != s || lp.height != s) {
+            lp.width = s
+            lp.height = s
+            v.layoutParams = lp
         }
     }
 
@@ -645,22 +668,26 @@ class LauncherActivity : AppCompatActivity() {
         vb.icon.outlineProvider = IconOutline
         vb.icon.clipToOutline = cell.custom
         vb.label.text = cell.label
-        vb.label.visibility = if (cell.showLabel) View.VISIBLE else View.GONE
+        // A hidden name keeps its space, so every icon sits at exactly the same height.
+        vb.label.visibility = if (cell.showLabel) View.VISIBLE else View.INVISIBLE
     }
 
     private fun renderDock() {
         val dock = b.dock
         dock.removeAllViews()
-        val cells = layout.dock.mapNotNull { appByKey[it] }
-            .filter { it.key !in layout.hidden }
-            .take(DOCK_MAX).map { cellFor(it) }
-        for (cell in cells) {
+        for ((i, key) in layout.dock.withIndex()) {
+            if (i >= DOCK_MAX) break
+            val app = appByKey[key] ?: continue
+            if (app.key in layout.hidden) continue
+            val cell = cellFor(app)
             val vb = ItemAppBinding.inflate(layoutInflater, dock, false)
             bindIcon(vb, cell)
             vb.label.visibility = View.GONE
+            setSquare(vb.icon, iconPx)
             vb.root.setOnClickListener { open(cell) }
+            // A dock icon is dragged as Placed(key, page -1, col = its place in the dock).
             vb.root.setOnLongClickListener {
-                beginDrag(it, Placed(cell.app.key, -1, 0, 0), vb.icon)
+                beginDrag(it, Placed(cell.app.key, -1, i, 0), vb.icon)
             }
             // Equal share of the full width: spread out like the original home screen.
             dock.addView(vb.root, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
@@ -691,12 +718,16 @@ class LauncherActivity : AppCompatActivity() {
     private fun beginDrag(v: View, item: Placed, shadowOf: View = v): Boolean {
         v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
         val s = popScale(item)
-        v.animate().scaleX(s).scaleY(s).rotation(6f).setDuration(120).withEndAction {
+        v.animate().scaleX(s).scaleY(s).rotation(6f).setDuration(120).start()
+        // A timer instead of an animation end-callback: the callback is skipped when the animation
+        // is cancelled, which used to leave an icon stuck bigger and tilted.
+        handler.postDelayed({
+            v.animate().cancel()
             v.scaleX = 1f
             v.scaleY = 1f
             v.rotation = 0f
             if (v.isAttachedToWindow) startDrag(v, item, shadowOf)
-        }.start()
+        }, 120)
         return true
     }
 
@@ -725,6 +756,7 @@ class LauncherActivity : AppCompatActivity() {
     private fun clearHighlight() {
         hoverTarget?.animate()?.scaleX(1f)?.scaleY(1f)?.setDuration(120)?.start()
         hoverTarget = null
+        dockHoverIdx = -1
     }
 
     /** The finger moved over a cell: after a short pause the icons there slide aside. */
@@ -803,6 +835,8 @@ class LauncherActivity : AppCompatActivity() {
         clearHighlight()
         restoreSnapshot(false)
         dropped = true
+        // An icon dragged out of the dock carries page -1 and its place in the dock in [col].
+        val fromDockIdx = if (item.page == -1) item.col else -1
         if (item.page == page && item.col == col && item.row == row) {
             // Picked up and put back in the same place: show the item's menu.
             showItemMenu(item)
@@ -811,14 +845,15 @@ class LauncherActivity : AppCompatActivity() {
         val other = layout.placedAt(page, col, row, item)
 
         // App dropped right onto another app (or a folder): make / fill a folder.
+        // (Two copies of the same app never make a folder together.)
         if (inCentre && other != null && other.w == 1 && other.h == 1 &&
-            item.w == 1 && item.h == 1 && isApp(item.key)
+            item.w == 1 && item.h == 1 && isApp(item.key) && other.key != item.key
         ) {
             if (isApp(other.key)) {
                 val f = layout.newFolder(getString(R.string.folder_default_name), listOf(other.key, item.key))
-                layout.items.remove(item)
-                layout.dock.remove(item.key)
-                layout.items.remove(other)
+                layout.items.removeAll { it === item }
+                if (fromDockIdx in layout.dock.indices) layout.dock.removeAt(fromDockIdx)
+                layout.items.removeAll { it === other }
                 layout.items.add(Placed(FOLDER_PREFIX + f.id, other.page, other.col, other.row))
                 layout.save()
                 return
@@ -826,8 +861,8 @@ class LauncherActivity : AppCompatActivity() {
             val folder = layout.folders[other.key.removePrefix(FOLDER_PREFIX)]
             if (folder != null) {
                 folder.keys.add(item.key)
-                layout.items.remove(item)
-                layout.dock.remove(item.key)
+                layout.items.removeAll { it === item }
+                if (fromDockIdx in layout.dock.indices) layout.dock.removeAt(fromDockIdx)
                 layout.save()
                 return
             }
@@ -843,10 +878,10 @@ class LauncherActivity : AppCompatActivity() {
         if (placed && item.isFree) {
             item.setFree(item.col + offX, item.row + offY, item.fw, item.fh)
         }
-        if (placed && item !in layout.items) {
-            // Came from the dock: now it lives on the page.
+        if (placed && layout.items.none { it === item }) {
+            // Came from the dock: now it lives on the page (only that dock slot is emptied).
             layout.items.add(item)
-            layout.dock.remove(item.key)
+            if (fromDockIdx in layout.dock.indices) layout.dock.removeAt(fromDockIdx)
         }
         layout.save()
     }
@@ -918,8 +953,24 @@ class LauncherActivity : AppCompatActivity() {
     }
 
     private var dockDragFrom = 0
+    private var dockHoverIdx = -1
 
-    /** Drag events over the dock: drop an app here to put it in the dock at that spot. */
+    /** Dock is full: lights up the icon under the finger, which the dragged app will replace. */
+    private fun highlightDockSlot(idx: Int) {
+        if (idx == dockHoverIdx && hoverTarget != null) return
+        clearHighlight()
+        val v = b.dock.getChildAt(idx) ?: return
+        dockHoverIdx = idx
+        v.animate().scaleX(1.18f).scaleY(1.18f).setDuration(120).start()
+        hoverTarget = v
+    }
+
+    /**
+     * Drag events over the dock (and the dots strip right above it, so the drop zone is easy to
+     * hit from the pages): drop an app here to put it in the dock at that spot. When the dock is
+     * already full the dropped app replaces the icon under it, and that icon takes the place the
+     * dropped app came from (a swap) instead of refusing the drop.
+     */
     private fun onDockDrag(e: android.view.DragEvent): Boolean {
         val item = e.localState as? Placed
         when (e.action) {
@@ -928,20 +979,24 @@ class LauncherActivity : AppCompatActivity() {
                 onEdge(0, 0)
                 hoverKey = ""
                 handler.removeCallbacks(hoverRunnable)
-                clearHighlight()
                 if (previewActive) restoreSnapshot(true)
                 if (item != null) {
-                    val inDock = item.key in layout.dock
+                    val fromDock = item.page == -1
                     val n = layout.dock.size
-                    if (!inDock && n >= DOCK_MAX) {
+                    if (!fromDock && n >= DOCK_MAX) {
                         hideMarker()
+                        highlightDockSlot(dockSlot(true, n, e.x))
                     } else {
-                        dockDragFrom = layout.dock.indexOf(item.key)
-                        showDockMarker(inDock, n, dockSlot(inDock, n, e.x))
+                        clearHighlight()
+                        dockDragFrom = if (fromDock) item.col else -1
+                        showDockMarker(fromDock, n, dockSlot(fromDock, n, e.x))
                     }
                 }
             }
-            android.view.DragEvent.ACTION_DRAG_EXITED -> hideMarker()
+            android.view.DragEvent.ACTION_DRAG_EXITED -> {
+                hideMarker()
+                clearHighlight()
+            }
             android.view.DragEvent.ACTION_DROP -> {
                 hideMarker()
                 if (item != null) dropOnDock(item, e.x)
@@ -961,26 +1016,31 @@ class LauncherActivity : AppCompatActivity() {
         dropped = true
         val key = item.key
         val app = appByKey[key] ?: return
-        val inDock = key in layout.dock
+        val fromDock = item.page == -1
         val n = layout.dock.size
-        if (!inDock && n >= DOCK_MAX) {
-            toast(R.string.toast_dock_full)
-            return
-        }
-        val idx = dockSlot(inDock, n, x)
-        if (inDock) {
-            val old = layout.dock.indexOf(key)
+        if (fromDock) {
+            // Re-ordering inside the dock; dropped on its own place = that icon's menu.
+            val old = item.col
+            if (old !in layout.dock.indices) return
+            val idx = dockSlot(true, n, x)
             if (old == idx) {
-                showDockMenu(cellFor(app))
+                showDockMenu(cellFor(app), old)
                 return
             }
             layout.dock.removeAt(old)
             layout.dock.add(idx.coerceAtMost(layout.dock.size), key)
+        } else if (n >= DOCK_MAX) {
+            // Full dock: swap. The dropped app takes the slot, the app that was there goes to the
+            // home-screen cell the dropped app has just left.
+            val idx = dockSlot(true, n, x)
+            val replaced = layout.dock[idx]
+            layout.dock[idx] = key
+            layout.items.removeAll { it === item }
+            layout.items.add(Placed(replaced, item.page, item.col, item.row))
         } else {
-            layout.items.removeAll { it.key == key }
-            for (f in layout.folders.values) f.keys.remove(key)
-            cleanFolders()
-            layout.dock.add(idx.coerceAtMost(layout.dock.size), key)
+            // Only this one copy leaves the home screen (other copies of the app stay where they are).
+            layout.items.removeAll { it === item }
+            layout.dock.add(dockSlot(false, n, x).coerceAtMost(layout.dock.size), key)
         }
         layout.save()
         render()
@@ -1057,7 +1117,7 @@ class LauncherActivity : AppCompatActivity() {
     private fun hideApp(app: AppItem) = ensurePin {
         layout.hidden.add(app.key)
         layout.items.removeAll { it.key == app.key }
-        layout.dock.remove(app.key)
+        layout.dock.removeAll { it == app.key }
         for (f in layout.folders.values) f.keys.remove(app.key)
         cleanFolders()
         stashHiddenWidgets()
@@ -1229,20 +1289,24 @@ class LauncherActivity : AppCompatActivity() {
         if (cell.custom) actions.add(getString(R.string.menu_reset_icon) to { resetIcon(app) })
         actions.add(getString(R.string.menu_resize_drag) to { startResize(item) })
         actions.add(getString(R.string.menu_size) to { showSizeDialog(item) })
-        actions.add(getString(R.string.menu_add_dock) to { moveToDock(app.key) })
-        actions.add(getString(R.string.menu_remove_home) to { removeFromHome(app.key) })
+        actions.add(getString(R.string.menu_clone) to { cloneApp(app.key) })
+        actions.add(getString(R.string.menu_add_dock) to { moveItemToDock(item) })
+        actions.add(getString(R.string.menu_remove_home) to { removeItem(item) })
         lockActions(app, actions)
         actions.add(getString(R.string.menu_app_info) to { appInfo(app) })
         actions.add(getString(R.string.menu_uninstall) to { uninstall(app) })
         showActions(cell.label, actions)
     }
 
-    private fun showDockMenu(cell: Cell) {
+    /** [dockIdx] = the place of this icon in the dock (the dock may hold copies of the same app). */
+    private fun showDockMenu(cell: Cell, dockIdx: Int) {
         val app = cell.app
         val actions = ArrayList<Pair<String, () -> Unit>>()
         actions.add(getString(R.string.menu_change_icon) to { openEditor(cell, 0, 0) })
         if (cell.custom) actions.add(getString(R.string.menu_reset_icon) to { resetIcon(app) })
-        actions.add(getString(R.string.menu_to_home) to { moveToHome(app.key) })
+        actions.add(getString(R.string.menu_clone) to { cloneApp(app.key) })
+        actions.add(getString(R.string.menu_to_home) to { moveDockToHome(dockIdx) })
+        actions.add(getString(R.string.menu_remove_dock) to { removeFromDock(dockIdx) })
         lockActions(app, actions)
         actions.add(getString(R.string.menu_app_info) to { appInfo(app) })
         actions.add(getString(R.string.menu_uninstall) to { uninstall(app) })
@@ -1258,6 +1322,7 @@ class LauncherActivity : AppCompatActivity() {
         if (cell.custom) actions.add(getString(R.string.menu_reset_icon) to { resetIcon(app) })
         if (!onHome) actions.add(getString(R.string.menu_add_home) to { closeDrawer(); moveToHome(app.key) })
         if (!inDock) actions.add(getString(R.string.menu_add_dock) to { moveToDock(app.key) })
+        actions.add(getString(R.string.menu_clone) to { closeDrawer(); cloneApp(app.key) })
         lockActions(app, actions)
         actions.add(getString(R.string.menu_app_info) to { appInfo(app) })
         actions.add(getString(R.string.menu_uninstall) to { uninstall(app) })
@@ -1632,12 +1697,75 @@ class LauncherActivity : AppCompatActivity() {
         render()
     }
 
-    private fun removeFromHome(key: String) {
-        layout.items.removeAll { it.key == key }
-        for (f in layout.folders.values) f.keys.remove(key)
-        cleanFolders()
+    /** Takes just this one icon off the home screen (copies of the same app are not touched). */
+    private fun removeItem(item: Placed) {
+        layout.items.removeAll { it === item }
         layout.save()
         render()
+    }
+
+    /** Moves just this one home-screen icon into the dock. */
+    private fun moveItemToDock(item: Placed) {
+        if (layout.dock.size >= DOCK_MAX) {
+            toast(R.string.toast_dock_full)
+            return
+        }
+        layout.items.removeAll { it === item }
+        layout.dock.add(item.key)
+        layout.save()
+        render()
+    }
+
+    /** Moves the dock icon at [idx] to the home screen (when the app is not already there). */
+    private fun moveDockToHome(idx: Int) {
+        val key = layout.dock.getOrNull(idx) ?: return
+        layout.dock.removeAt(idx)
+        if (!layout.isPlaced(key)) layout.addAuto(key, curPageId(), curRow())
+        layout.save()
+        render()
+    }
+
+    private fun removeFromDock(idx: Int) {
+        if (idx !in layout.dock.indices) return
+        layout.dock.removeAt(idx)
+        layout.save()
+        render()
+    }
+
+    // ---- clones: the same app twice (or more), e.g. one icon in the dock and one on the page
+
+    /** Asks where the extra copy of the app goes. */
+    private fun cloneApp(key: String) {
+        val app = appByKey[key] ?: return
+        showActions(
+            getString(R.string.clone_where_title, cellFor(app).label),
+            listOf(
+                getString(R.string.clone_to_home) to { cloneToHome(key) },
+                getString(R.string.clone_to_dock) to { cloneToDock(key) }
+            )
+        )
+    }
+
+    private fun cloneToHome(key: String) {
+        // First free cell, starting with the page being shown. Pages are never created for this.
+        if (!placeIfRoom(key, curPageId())) {
+            toast(R.string.toast_no_room)
+            return
+        }
+        layout.save()
+        render()
+        toast(R.string.toast_cloned)
+    }
+
+    private fun cloneToDock(key: String) {
+        if (layout.dock.size >= DOCK_MAX) {
+            toast(R.string.toast_dock_full)
+            return
+        }
+        layout.dock.add(key)
+        layout.save()
+        render()
+        toast(R.string.toast_cloned)
     }
 
     private fun appInfo(app: AppItem) =

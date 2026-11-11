@@ -69,6 +69,10 @@ class HomeGridView(ctx: Context) : ViewGroup(ctx) {
             oldX[c] = c.left + c.translationX
             oldY[c] = c.top + c.translationY
             c.animate().cancel()
+            // A cancelled "pop"/highlight animation must never leave an icon bigger, smaller or tilted.
+            c.scaleX = 1f
+            c.scaleY = 1f
+            c.rotation = 0f
             val p = c.tag as? Placed ?: continue
             if (p.page != pageIndex) continue
             val lp = c.layoutParams as LP

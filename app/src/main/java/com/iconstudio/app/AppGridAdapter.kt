@@ -43,7 +43,9 @@ data class Cell(
 
 class AppGridAdapter(
     private val onClick: (Cell) -> Unit,
-    private val onLongClick: (Cell) -> Unit
+    private val onLongClick: (Cell) -> Unit,
+    /** Fixed icon size in px (same as on the home screen); 0 = keep the size from the layout file. */
+    private val iconSize: () -> Int = { 0 }
 ) : RecyclerView.Adapter<AppGridAdapter.VH>() {
 
     private var items: List<Cell> = emptyList()
@@ -59,6 +61,13 @@ class AppGridAdapter(
         val vh = VH(ItemAppBinding.inflate(LayoutInflater.from(parent.context), parent, false))
         // Custom (square) images get the same rounded shape as other icons.
         vh.b.icon.outlineProvider = IconOutline
+        val s = iconSize()
+        if (s > 0) {
+            val lp = vh.b.icon.layoutParams
+            lp.width = s
+            lp.height = s
+            vh.b.icon.layoutParams = lp
+        }
         return vh
     }
 

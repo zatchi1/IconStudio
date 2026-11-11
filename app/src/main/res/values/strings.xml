@@ -134,4 +134,10 @@
     <string name="toast_snap_on">Snap to grid: on</string>
     <string name="toast_snap_off">Free placement: snap to grid is off</string>
     <string name="search_widgets_hint">Search widgets</string>
+
+    <string name="menu_clone">Clone app (second icon)</string>
+    <string name="clone_where_title">Where should the copy of %1$s go?</string>
+    <string name="clone_to_home">On the home screen</string>
+    <string name="clone_to_dock">In the bottom dock</string>
+    <string name="toast_cloned">Copy added</string>
 </resources>

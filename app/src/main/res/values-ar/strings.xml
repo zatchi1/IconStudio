@@ -132,4 +132,10 @@
     <string name="toast_snap_on">الالتقاط إلى الشبكة: مفعّل</string>
     <string name="toast_snap_off">توزيع حر: الالتقاط إلى الشبكة متوقف</string>
     <string name="search_widgets_hint">ابحث عن ويدجت</string>
+
+    <string name="menu_clone">استنساخ التطبيق (أيقونة ثانية)</string>
+    <string name="clone_where_title">أين تضع نسخة «%1$s»؟</string>
+    <string name="clone_to_home">على الشاشة الرئيسية</string>
+    <string name="clone_to_dock">في الشريط السفلي</string>
+    <string name="toast_cloned">تمت إضافة النسخة</string>
 </resources>
