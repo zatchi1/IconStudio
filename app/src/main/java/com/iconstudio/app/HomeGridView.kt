@@ -145,7 +145,7 @@ class HomeGridView(ctx: Context) : ViewGroup(ctx) {
         when (e.action) {
             DragEvent.ACTION_DRAG_STARTED -> return item != null
             DragEvent.ACTION_DRAG_LOCATION -> {
-                val edge = 28 * resources.displayMetrics.density
+                val edge = 44 * resources.displayMetrics.density
                 val dx = if (e.x < edge) -1 else if (e.x > width - edge) 1 else 0
                 val dy = if (dx != 0) 0 else if (e.y < edge) -1 else if (e.y > height - edge) 1 else 0
                 onEdge?.invoke(dx, dy)

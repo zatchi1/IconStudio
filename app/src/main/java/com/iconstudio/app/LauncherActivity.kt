@@ -72,8 +72,8 @@ class LauncherActivity : AppCompatActivity() {
         private const val REQUEST_CONFIG = 701
         private const val WIDGET_PREFIX = "widget:"
         private const val FOLDER_PREFIX = "folder:"
-        private const val EDGE_DWELL_MS = 700L
-        private const val EDGE_REPEAT_MS = 900L
+        private const val EDGE_DWELL_MS = 450L
+        private const val EDGE_REPEAT_MS = 800L
     }
 
     private lateinit var b: ActivityLauncherBinding
@@ -212,9 +212,10 @@ class LauncherActivity : AppCompatActivity() {
         b.grid.adapter = drawerAdapter
 
         b.dock.setOnDragListener { _, e -> onDockDrag(e) }
-        // The strip with the page dots sits right above the dock: dropping there counts as dropping
-        // on the dock, so moving an app down from the pages is easy to hit.
-        b.dots.setOnDragListener { _, e -> onDockDrag(e) }
+        // The strips above and below the pages: holding a dragged item there flips to the page
+        // above / below (so an app can be carried to the next page without a tiny edge to hit).
+        b.header.setOnDragListener { _, e -> onEdgeZoneDrag(e, -1) }
+        b.dots.setOnDragListener { _, e -> onEdgeZoneDrag(e, 1) }
         b.dots.setOnLongClickListener { showPagesMenu(); true }
         b.vdots.setOnLongClickListener { showPagesMenu(); true }
         b.btnSearch.setOnClickListener { openDrawer(true) }
@@ -612,55 +613,21 @@ class LauncherActivity : AppCompatActivity() {
      * short to hold the icon and its name, and then it does so identically for all icons.
      */
     @Suppress("UNUSED_PARAMETER")
-    private fun fitIcon(root: View, icon: View, label: View) {
-        // Same size for every icon, set right away (no waiting for a layout pass).
-        setSquare(icon, iconPx)
-        root.addOnLayoutChangeListener { _, _, t, _, bt, _, _, _, _ ->
-            val h = bt - t
-            if (h <= 0) return@addOnLayoutChangeListener
-            // The name line is always reserved (even when hidden), so the size does not depend on
-            // it. Icons only get smaller when a cell is too short to hold an icon and a name.
-            val s = minOf(iconPx, (h - dp(24)).coerceAtLeast(dp(28)))
-            setSquare(icon, s)
-        }
-    }
-
-    private fun setSquare(v: View, s: Int) {
-        val lp = v.layoutParams ?: return
-        if (lp.width != s || lp.height != s) {
-            lp.width = s
-            lp.height = s
-            v.layoutParams = lp
-        }
+    private fun fitIcon(root: FitIconLayout, icon: View, label: View) {
+        // The size is applied while the cell is measured (see FitLayouts.kt), so the first frame
+        // is already right: no later resize that can get lost, no jump after pressing Home.
+        root.maxIcon = iconPx
     }
 
     /**
      * Gives a big tile exactly the w:h shape of its size (2x2 is a square, 4x3 a 4:3 rectangle),
      * as large as fits inside the cells it covers, centred. The editor frame has the same
-     * shape, so what is cropped there is what is shown here.
+     * shape, so what is cropped there is what is shown here. Done in onMeasure (FitLayouts.kt).
      */
-    private fun fitTile(root: android.widget.LinearLayout, tile: View, label: View, w: Int, h: Int) {
+    @Suppress("UNUSED_PARAMETER")
+    private fun fitTile(root: FitTileLayout, tile: View, label: View, w: Int, h: Int) {
         root.gravity = Gravity.CENTER
-        root.addOnLayoutChangeListener { _, l, t, r, bt, _, _, _, _ ->
-            val aw = (r - l) - dp(8)
-            val labelH = if (label.visibility == View.VISIBLE) dp(20) else 0
-            val ah = (bt - t) - dp(8) - labelH
-            if (aw <= 0 || ah <= 0) return@addOnLayoutChangeListener
-            val ratio = w.toFloat() / h
-            var tw = aw
-            var th = (tw / ratio).toInt()
-            if (th > ah) {
-                th = ah
-                tw = (th * ratio).toInt()
-            }
-            val lp = tile.layoutParams as android.widget.LinearLayout.LayoutParams
-            if (lp.width != tw || lp.height != th || lp.weight != 0f) {
-                lp.width = tw
-                lp.height = th
-                lp.weight = 0f
-                tile.layoutParams = lp
-            }
-        }
+        root.ratio = w.toFloat() / h
     }
 
     private fun bindIcon(vb: ItemAppBinding, cell: Cell) {
@@ -683,7 +650,7 @@ class LauncherActivity : AppCompatActivity() {
             val vb = ItemAppBinding.inflate(layoutInflater, dock, false)
             bindIcon(vb, cell)
             vb.label.visibility = View.GONE
-            setSquare(vb.icon, iconPx)
+            vb.root.maxIcon = iconPx
             vb.root.setOnClickListener { open(cell) }
             // A dock icon is dragged as Placed(key, page -1, col = its place in the dock).
             vb.root.setOnLongClickListener {
@@ -712,7 +679,8 @@ class LauncherActivity : AppCompatActivity() {
         }
     }
 
-    private fun popScale(item: Placed) = if (item.w * item.h == 1) 1.15f else 1.03f
+    // Only a slight lift: the pressed icon must not balloon in size.
+    private fun popScale(item: Placed) = if (item.w * item.h == 1) 1.07f else 1.02f
 
     /** Long press: a quick "pop" bounce, then the item follows the finger. */
     private fun beginDrag(v: View, item: Placed, shadowOf: View = v): Boolean {
@@ -784,7 +752,7 @@ class LauncherActivity : AppCompatActivity() {
         ) {
             // About to make / fill a folder: just enlarge the target a little.
             val v = grids.firstOrNull { it.pageIndex == hoverPage }?.viewOf(other)
-            v?.animate()?.scaleX(1.18f)?.scaleY(1.18f)?.setDuration(120)?.start()
+            v?.animate()?.scaleX(1.1f)?.scaleY(1.1f)?.setDuration(120)?.start()
             hoverTarget = v
             return
         }
@@ -952,6 +920,44 @@ class LauncherActivity : AppCompatActivity() {
         m.bringToFront()
     }
 
+    /**
+     * Drag events over the strip above ([dy] = -1) or below ([dy] = 1) the pages: holding the item
+     * there turns to the neighbouring page; letting go there drops it in the edge row of the page
+     * that is showing, under the finger.
+     */
+    private fun onEdgeZoneDrag(e: android.view.DragEvent, dy: Int): Boolean {
+        val item = e.localState as? Placed
+        when (e.action) {
+            android.view.DragEvent.ACTION_DRAG_STARTED -> return item != null
+            android.view.DragEvent.ACTION_DRAG_ENTERED, android.view.DragEvent.ACTION_DRAG_LOCATION -> {
+                hoverKey = ""
+                handler.removeCallbacks(hoverRunnable)
+                clearHighlight()
+                hideMarker()
+                if (previewActive) restoreSnapshot(true)
+                onEdge(0, dy)
+            }
+            android.view.DragEvent.ACTION_DRAG_EXITED -> onEdge(0, 0)
+            android.view.DragEvent.ACTION_DROP -> {
+                onEdge(0, 0)
+                if (item != null) dropAtEdge(item, e.x, dy)
+            }
+            android.view.DragEvent.ACTION_DRAG_ENDED -> {
+                onEdge(0, 0)
+                onDragEnded()
+            }
+        }
+        return true
+    }
+
+    private fun dropAtEdge(item: Placed, x: Float, dy: Int) {
+        val cw = (resources.displayMetrics.widthPixels - dp(12)) / HomeLayout.COLS.toFloat()
+        val col = Math.round((x - dp(6)) / cw - item.w / 2f)
+            .coerceIn(0, HomeLayout.COLS - item.w)
+        val row = if (dy > 0) HomeLayout.ROWS - item.h else 0
+        onDrop(item, curPageId(), col, row, false)
+    }
+
     private var dockDragFrom = 0
     private var dockHoverIdx = -1
 
@@ -961,7 +967,7 @@ class LauncherActivity : AppCompatActivity() {
         clearHighlight()
         val v = b.dock.getChildAt(idx) ?: return
         dockHoverIdx = idx
-        v.animate().scaleX(1.18f).scaleY(1.18f).setDuration(120).start()
+        v.animate().scaleX(1.1f).scaleY(1.1f).setDuration(120).start()
         hoverTarget = v
     }
 
@@ -1252,11 +1258,27 @@ class LauncherActivity : AppCompatActivity() {
 
     // ================================================================ menus
 
+    /** The long-press menu: the same compact dark card as the three-dots menu. */
     private fun showActions(title: String, actions: List<Pair<String, () -> Unit>>) {
-        MaterialAlertDialogBuilder(this)
-            .setTitle(title)
-            .setItems(actions.map { it.first }.toTypedArray()) { _, i -> actions[i].second() }
-            .show()
+        val (dlg, card) = cardDialog(250)
+        card.addView(cardTitle(title))
+        val list = LinearLayout(this)
+        list.orientation = LinearLayout.VERTICAL
+        val danger = getString(R.string.menu_uninstall)
+        for ((label, run) in actions) {
+            list.addView(
+                cardRow(label, label == danger) {
+                    dlg.dismiss()
+                    run()
+                },
+                LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            )
+        }
+        val sv = android.widget.ScrollView(this)
+        sv.isVerticalScrollBarEnabled = false
+        sv.addView(list)
+        card.addView(sv, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        dlg.show()
     }
 
     private fun lockActions(app: AppItem, into: MutableList<Pair<String, () -> Unit>>) {
